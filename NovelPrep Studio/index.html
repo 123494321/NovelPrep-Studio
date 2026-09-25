@@ -319,6 +319,7 @@
                         <i class="fa-solid fa-eye text-brand"></i>
                         <span>번호가 주입된 완성형 원고 미리보기</span>
                         <span class="badge badge-success"><i class="fa-solid fa-check"></i> 원문 연출 100% 보존 완료</span>
+                        <span id="txtPreviewNoticeBadge" class="badge badge-secondary hidden">100줄 미리보기 (렉 방지)</span>
                     </div>
                     <div class="result-actions">
                         <button id="btnCopyResult" class="btn btn-secondary" title="클립보드에 전체 복사">
@@ -413,21 +414,25 @@
                                     </select>
                                 </div>
 
+                                <div class="form-group">
+                                    <label for="selectRubyMode">루비 태그(&lt;ruby&gt;) 독음 처리 방식</label>
+                                    <select id="selectRubyMode" class="form-select">
+                                        <option value="baseOnly" selected>본문 글자만 보존 (독음 제거 - 원문 100% 보존 권장)</option>
+                                        <option value="bracket">괄호 독음 병기 (예: 魔法(매직))</option>
+                                        <option value="raw">단순 태그 제거 (구형 방식: 魔法매직)</option>
+                                    </select>
+                                </div>
+
                                 <div class="options-checkbox-group">
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="checkInsertChapterTitles" checked>
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">TOC 목차명으로 챕터 소제목 자동 보완 <small class="text-muted">(본문에 제목 없는 챕터 복구)</small></span>
+                                    </label>
                                     <label class="custom-checkbox">
                                         <input type="checkbox" id="checkExtractImages" checked>
                                         <span class="checkmark"></span>
                                         <span class="label-text">내부 이미지(표지·삽화) 함께 추출</span>
-                                    </label>
-                                    <label class="custom-checkbox">
-                                        <input type="checkbox" id="checkHandleRuby" checked>
-                                        <span class="checkmark"></span>
-                                        <span class="label-text">루비 태그(&lt;ruby&gt;) 독음 정리 <small class="text-muted">(한자[독음] 형태로 깔끔 변환)</small></span>
-                                    </label>
-                                    <label class="custom-checkbox">
-                                        <input type="checkbox" id="checkInsertChapterTitles" checked>
-                                        <span class="checkmark"></span>
-                                        <span class="label-text">TOC 목차명으로 챕터 소제목 자동 보완</span>
                                     </label>
                                 </div>
                             </div>
@@ -464,9 +469,12 @@
                             <!-- Text Pane -->
                             <div id="eprev-text" class="eprev-pane active">
                                 <div class="text-pane-header">
-                                    <span id="extractedCharsCount" class="text-muted">추출 대기 중...</span>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span id="extractedCharsCount" class="text-muted">추출 대기 중...</span>
+                                        <span id="epubPreviewNoticeBadge" class="badge badge-secondary hidden">100줄 미리보기 (렉 방지)</span>
+                                    </div>
                                     <button id="btnCopyEpubTxt" class="btn btn-sm btn-secondary" disabled>
-                                        <i class="fa-regular fa-copy"></i> 복사
+                                        <i class="fa-regular fa-copy"></i> 전체 원고 복사
                                     </button>
                                 </div>
                                 <textarea id="epubExtractedTextPreview" class="code-preview" placeholder="EPUB 파일을 업로드하고 역변환을 실행하면 정제된 순수 텍스트가 여기에 표시됩니다." readonly></textarea>

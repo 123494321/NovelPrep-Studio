@@ -1,11 +1,14 @@
 /**
  * NovelPrep Studio - 구형 EPUB ➔ 순수 TXT 고품질 역변환기
  * 
- * [핵심 기능]
- * 1. 비표준/구형 EPUB 완벽 분해 (container.xml ➔ OPF ➔ Spine 순서 파싱)
- * 2. 난잡한 비표준 HTML 태그, 인라인 스타일, 엔티티를 정제하여 순수 문단 호흡 복원
- * 3. 표지 및 삽화 이미지 원본 파일 그대로 일괄 분리 추출
- * 4. 순수 TXT 및 이미지 ZIP 패키징 다운로드 지원
+ * [개선된 핵심 기능]
+ * 1. 비표준/구형 EPUB 완벽 분해 (container.xml ➔ OPF ➔ Spine ➔ TOC 매핑)
+ * 2. 루비 태그(<ruby>) 원문 100% 보존 모드:
+ *    - 'baseOnly' (기본): 독음 태그를 제거하고 작가의 원문 본문 글자만 완벽 보존
+ *    - 'bracket': 독음을 괄호로 병기 (한자(독음))
+ *    - 'raw': 단순 태그 제거
+ * 3. TOC 목차명 기반 챕터 소제목 자동 보완 (본문에 제목이 소실된 챕터 복구)
+ * 4. 스마트 미리보기(100줄 슬라이스)를 통한 대용량 원고 브라우저 프리징 0% 보장
  */
 
 class EpubExtractor {
@@ -19,12 +22,11 @@ class EpubExtractor {
         this.chapters = [];
         this.images = [];
         this.extractedText = '';
+        this.tocMap = new Map(); // normalized href -> title
     }
 
     /**
      * ArrayBuffer 또는 File 객체를 받아 EPUB 파싱 시작
-     * @param {File|ArrayBuffer} fileOrBuffer 
-     * @param {object} options 
      */
     async loadEpub(fileOrBuffer, options = {}) {
         if (typeof JSZip === 'undefined') {
@@ -36,6 +38,7 @@ class EpubExtractor {
         this.chapters = [];
         this.images = [];
         this.extractedText = '';
+        this.tocMap = new Map();
 
         // 1. META-INF/container.xml 파싱하여 OPF 경로 획득
         const opfPath = await this.getOpfPath();
@@ -43,7 +46,6 @@ class EpubExtractor {
             throw new Error('EPUB 표준 구조(container.xml)를 찾을 수 없습니다.');
         }
 
-        // OPF 파일의 기본 디렉터리 경로 계산
         const opfDir = opfPath.includes('/') ? opfPath.substring(0, opfPath.lastIndexOf('/') + 1) : '';
 
         // 2. OPF 파일 내용 읽기
@@ -58,18 +60,21 @@ class EpubExtractor {
         // 3. 메타데이터 파싱
         this.parseMetadata(opfDoc);
 
-        // 4. Manifest 파싱 (id -> { href, mediaType, fullPath })
+        // 4. Manifest 파싱
         const manifestMap = this.parseManifest(opfDoc, opfDir);
 
-        // 5. Spine 순서 파싱
+        // 5. TOC 목차 파일(ncx / nav) 파싱하여 챕터명 매핑 구축
+        await this.parseTocFile(opfDoc, manifestMap);
+
+        // 6. Spine 순서 파싱
         const spineItems = this.parseSpine(opfDoc, manifestMap);
 
-        // 6. 이미지 파일 추출
+        // 7. 이미지 파일 추출
         if (options.extractImages !== false) {
             await this.extractImages(manifestMap);
         }
 
-        // 7. 각 챕터 HTML 파일 텍스트 정제 및 결합
+        // 8. 각 챕터 HTML 파일 텍스트 정제 및 결합
         await this.extractChaptersText(spineItems, options);
 
         return {
@@ -77,6 +82,7 @@ class EpubExtractor {
             chapterCount: this.chapters.length,
             imageCount: this.images.length,
             extractedText: this.extractedText,
+            previewText: this.getPreviewText(100),
             images: this.images
         };
     }
@@ -126,23 +132,96 @@ class EpubExtractor {
             const id = item.getAttribute('id');
             const href = item.getAttribute('href');
             const mediaType = item.getAttribute('media-type') || '';
+            const properties = item.getAttribute('properties') || '';
 
             if (id && href) {
-                // 상대경로 결합 및 URL 디코딩
                 let fullPath = opfDir + href;
-                // 경로 정규화 (예: OEBPS/../Text/ch1.xhtml)
                 fullPath = this.resolvePath(fullPath);
 
                 manifestMap.set(id, {
                     id,
                     href,
                     mediaType,
+                    properties,
                     fullPath
                 });
             }
         });
 
         return manifestMap;
+    }
+
+    /**
+     * TOC 목차 파일(toc.ncx 또는 nav.xhtml) 파싱하여 파일별 챕터 제목 매핑
+     */
+    async parseTocFile(opfDoc, manifestMap) {
+        this.tocMap = new Map();
+
+        // 1. EPUB 2 ncx 파일 탐색
+        let ncxItem = null;
+        for (const [id, item] of manifestMap.entries()) {
+            if (item.mediaType === 'application/x-dtbncx+xml' || id.toLowerCase().includes('ncx') || item.fullPath.toLowerCase().endsWith('.ncx')) {
+                ncxItem = item;
+                break;
+            }
+        }
+
+        if (ncxItem) {
+            const ncxFile = this.zip.file(ncxItem.fullPath);
+            if (ncxFile) {
+                const ncxText = await ncxFile.async('text');
+                const parser = new DOMParser();
+                const ncxDoc = parser.parseFromString(ncxText, 'application/xml');
+                const navPoints = ncxDoc.querySelectorAll('navPoint');
+
+                const ncxDir = ncxItem.fullPath.includes('/') ? ncxItem.fullPath.substring(0, ncxItem.fullPath.lastIndexOf('/') + 1) : '';
+
+                navPoints.forEach(point => {
+                    const textEl = point.querySelector('navLabel > text');
+                    const contentEl = point.querySelector('content');
+                    if (textEl && contentEl) {
+                        const title = textEl.textContent.trim();
+                        let src = contentEl.getAttribute('src') || '';
+                        src = src.split('#')[0]; // 앵커 제거
+                        let targetPath = this.resolvePath(ncxDir + src);
+                        if (title && targetPath) {
+                            this.tocMap.set(targetPath, title);
+                        }
+                    }
+                });
+            }
+        }
+
+        // 2. EPUB 3 nav 파일 탐색
+        let navItem = null;
+        for (const [id, item] of manifestMap.entries()) {
+            if (item.properties.includes('nav') || id.toLowerCase().includes('nav') || item.fullPath.toLowerCase().includes('nav.')) {
+                navItem = item;
+                break;
+            }
+        }
+
+        if (navItem && this.tocMap.size === 0) {
+            const navFile = this.zip.file(navItem.fullPath);
+            if (navFile) {
+                const navText = await navFile.async('text');
+                const parser = new DOMParser();
+                const navDoc = parser.parseFromString(navText, 'text/html');
+                const navLinks = navDoc.querySelectorAll('nav a, a');
+
+                const navDir = navItem.fullPath.includes('/') ? navItem.fullPath.substring(0, navItem.fullPath.lastIndexOf('/') + 1) : '';
+
+                navLinks.forEach(a => {
+                    const title = a.textContent.trim();
+                    let href = a.getAttribute('href') || '';
+                    href = href.split('#')[0];
+                    let targetPath = this.resolvePath(navDir + href);
+                    if (title && targetPath && !this.tocMap.has(targetPath)) {
+                        this.tocMap.set(targetPath, title);
+                    }
+                });
+            }
+        }
     }
 
     /**
@@ -196,8 +275,9 @@ class EpubExtractor {
     async extractChaptersText(spineItems, options = {}) {
         const chapterTexts = [];
         const {
-            paragraphSpacing = 'standard', // 'standard' (빈 줄 1개), 'single' (엔터 1개), 'raw'
-            handleRuby = true
+            paragraphSpacing = 'standard',
+            rubyMode = 'baseOnly', // 'baseOnly' (기본: 본문만), 'bracket' (괄호병기), 'raw'
+            insertChapterTitles = true
         } = options;
 
         for (let i = 0; i < spineItems.length; i++) {
@@ -207,12 +287,25 @@ class EpubExtractor {
             if (!zipEntry) continue;
 
             const htmlContent = await zipEntry.async('text');
-            const cleanText = this.cleanHtmlToText(htmlContent, {
+            let cleanText = this.cleanHtmlToText(htmlContent, {
                 paragraphSpacing,
-                handleRuby
+                rubyMode
             });
 
             if (cleanText.trim().length > 0) {
+                // TOC 목차명으로 챕터 소제목 자동 보완
+                if (insertChapterTitles && this.tocMap.has(item.fullPath)) {
+                    const tocTitle = this.tocMap.get(item.fullPath);
+                    // 본문 시작 첫 3줄 내에 이미 목차 제목이 있는지 확인 (대소문자/공백 무시)
+                    const normalizedTocTitle = tocTitle.replace(/\s+/g, '');
+                    const firstFewLines = cleanText.split('\n').slice(0, 3).join('').replace(/\s+/g, '');
+
+                    if (!firstFewLines.includes(normalizedTocTitle)) {
+                        // 제목이 본문 첫머리에 없으면 상단에 주입
+                        cleanText = `${tocTitle}\n\n${cleanText}`;
+                    }
+                }
+
                 this.chapters.push({
                     index: i + 1,
                     id: item.id,
@@ -231,7 +324,7 @@ class EpubExtractor {
      * 비표준 HTML을 자연스럽고 깨끗한 순수 텍스트로 정제
      */
     cleanHtmlToText(html, options = {}) {
-        const { paragraphSpacing = 'standard', handleRuby = true } = options;
+        const { paragraphSpacing = 'standard', rubyMode = 'baseOnly' } = options;
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
 
@@ -239,34 +332,39 @@ class EpubExtractor {
         const uselessEls = doc.querySelectorAll('script, style, link, meta, head');
         uselessEls.forEach(el => el.remove());
 
-        // 2. 루비 태그(<ruby>) 처리: 한자[독음] 형태로 정돈
-        if (handleRuby) {
-            const rubyEls = doc.querySelectorAll('ruby');
-            rubyEls.forEach(ruby => {
-                const rt = ruby.querySelector('rt');
-                const baseText = Array.from(ruby.childNodes)
-                    .filter(n => n.nodeType === Node.TEXT_NODE || (n.nodeName !== 'RT' && n.nodeName !== 'RP'))
-                    .map(n => n.textContent)
-                    .join('').trim();
-                
+        // 2. 루비 태그(<ruby>) 처리
+        const rubyEls = doc.querySelectorAll('ruby');
+        rubyEls.forEach(ruby => {
+            const rt = ruby.querySelector('rt');
+            const baseText = Array.from(ruby.childNodes)
+                .filter(n => n.nodeType === Node.TEXT_NODE || (n.nodeName !== 'RT' && n.nodeName !== 'RP'))
+                .map(n => n.textContent)
+                .join('').trim();
+
+            if (rubyMode === 'baseOnly') {
+                // 작가 원문 글자만 보존 (독음 제거 - 원문 100% 보존)
+                ruby.replaceWith(document.createTextNode(baseText));
+            } else if (rubyMode === 'bracket') {
+                // 괄호 병기 형태 (예: 魔法(매직))
                 if (rt && rt.textContent.trim()) {
                     ruby.replaceWith(document.createTextNode(`${baseText}(${rt.textContent.trim()})`));
                 } else if (baseText) {
                     ruby.replaceWith(document.createTextNode(baseText));
                 }
-            });
-        }
+            } else {
+                // raw: 단순 텍스트 연결 (구형 방식: 魔法매직)
+                const fullText = ruby.textContent || '';
+                ruby.replaceWith(document.createTextNode(fullText));
+            }
+        });
 
         // 3. 문단 구분자 처리: <p>, <div>, <h1>~<h6>, <li>, <br>
         const body = doc.body || doc.documentElement;
         if (!body) return '';
 
-        // 줄바꿈 마커를 삽입하여 문단 호흡 유지
-        // <br> 태그는 단일 줄바꿈으로
         const brs = body.querySelectorAll('br');
         brs.forEach(br => br.replaceWith(document.createTextNode('\n')));
 
-        // 블록 레벨 엘리먼트 앞뒤로 마커 개행 삽입
         const blockEls = body.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, blockquote, tr');
         blockEls.forEach(block => {
             block.prepend(document.createTextNode('\n'));
@@ -283,7 +381,6 @@ class EpubExtractor {
         let lines = rawExtracted.split(/\r?\n/).map(line => line.trim());
 
         if (paragraphSpacing === 'standard') {
-            // 표준 웹소설/도서 호흡: 연속된 빈 줄을 최대 1개(엔터 2번)로 정돈
             let formatted = [];
             let lastWasEmpty = true;
 
@@ -300,12 +397,24 @@ class EpubExtractor {
             }
             return formatted.join('\n').trim();
         } else if (paragraphSpacing === 'single') {
-            // 빈 줄 없이 연속 줄바꿈
             return lines.filter(line => line.length > 0).join('\n').trim();
         } else {
-            // raw: 원본 라인 유지
             return lines.join('\n').trim();
         }
+    }
+
+    /**
+     * 브라우저 렉 방지용 상위 100줄 미리보기 추출
+     */
+    getPreviewText(maxLines = 100) {
+        if (!this.extractedText) return '';
+        const lines = this.extractedText.split('\n');
+        if (lines.length <= maxLines) {
+            return this.extractedText;
+        }
+        const previewPart = lines.slice(0, maxLines).join('\n');
+        const remainingLines = lines.length - maxLines;
+        return `${previewPart}\n\n============================================================\n[안내] 브라우저 성능 보호를 위해 앞부분 100줄만 미리 표시됩니다.\n(총 ${lines.length.toLocaleString()}줄 / ${this.extractedText.length.toLocaleString()}자 전체 원고는 하단의 [순수 원고 다운로드] 버튼을 이용하세요)\n============================================================`;
     }
 
     /**
@@ -332,7 +441,6 @@ class EpubExtractor {
         const textarea = document.createElement('textarea');
         textarea.innerHTML = str;
         let decoded = textarea.value;
-        // Non-breaking space 및 전각 공백 처리
         decoded = decoded.replace(/\u00a0/g, ' ').replace(/\u3000/g, '  ');
         return decoded;
     }
@@ -371,11 +479,9 @@ class EpubExtractor {
     async generatePackageZip() {
         const zip = new JSZip();
         
-        // 1. TXT 원고 추가
         const txtFileName = `${this.metadata.title || '원고'}.txt`;
         zip.file(txtFileName, this.extractedText);
 
-        // 2. 이미지 폴더 추가
         if (this.images.length > 0) {
             const imgFolder = zip.folder('images');
             for (const img of this.images) {

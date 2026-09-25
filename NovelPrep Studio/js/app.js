@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const state = {
         tocItems: [],
         txtFile: null,       // { name, size, text, charCount, lineCount }
+        normalizedFullText: '', // 전체 정규화 원고
         epubFile: null,      // File
         epubResult: null,    // { metadata, chapterCount, imageCount, extractedText, images }
         activeTab: 'tab-normalizer'
@@ -73,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tab 1: Result & Export
     const resultPreviewPanel = document.getElementById('resultPreviewPanel');
     const resultTextPreview = document.getElementById('resultTextPreview');
+    const txtPreviewNoticeBadge = document.getElementById('txtPreviewNoticeBadge');
     const btnCopyResult = document.getElementById('btnCopyResult');
     const btnDownloadResult = document.getElementById('btnDownloadResult');
 
@@ -85,8 +87,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const epubMetaChapters = document.getElementById('epubMetaChapters');
     const epubMetaImages = document.getElementById('epubMetaImages');
     const selectParagraphSpacing = document.getElementById('selectParagraphSpacing');
+    const selectRubyMode = document.getElementById('selectRubyMode');
+    const checkInsertChapterTitles = document.getElementById('checkInsertChapterTitles');
     const checkExtractImages = document.getElementById('checkExtractImages');
-    const checkHandleRuby = document.getElementById('checkHandleRuby');
     const btnRunEpubExtraction = document.getElementById('btnRunEpubExtraction');
 
     // Tab 2: Result & Export
@@ -94,6 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const eprevPanes = document.querySelectorAll('.eprev-pane');
     const galleryCount = document.getElementById('galleryCount');
     const extractedCharsCount = document.getElementById('extractedCharsCount');
+    const epubPreviewNoticeBadge = document.getElementById('epubPreviewNoticeBadge');
     const epubExtractedTextPreview = document.getElementById('epubExtractedTextPreview');
     const epubImagesGallery = document.getElementById('epubImagesGallery');
     const btnCopyEpubTxt = document.getElementById('btnCopyEpubTxt');
@@ -389,11 +393,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 ignoreSpaces
             });
 
+            // Store Full Text
+            state.normalizedFullText = result.normalizedText;
+
             // Render Diagnostics
             renderDiagnostics(result.diagnostics);
 
-            // Render Result Preview
-            resultTextPreview.value = result.normalizedText;
+            // Render Smart 100-line Preview (Protect browser from freezing)
+            const lines = result.normalizedText.split(/\r?\n/);
+            if (lines.length > 100) {
+                resultTextPreview.value = lines.slice(0, 100).join('\n') + `\n\n============================================================\n[안내] 브라우저 성능 보호를 위해 앞부분 100줄만 미리 표시됩니다.\n(총 ${lines.length.toLocaleString()}줄 / ${result.normalizedText.length.toLocaleString()}자 전체 원고는 [완성 원고 다운로드] 버튼을 이용하세요)\n============================================================`;
+                txtPreviewNoticeBadge.classList.remove('hidden');
+            } else {
+                resultTextPreview.value = result.normalizedText;
+                txtPreviewNoticeBadge.classList.add('hidden');
+            }
+
             resultPreviewPanel.classList.remove('hidden');
             resultPreviewPanel.scrollIntoView({ behavior: 'smooth' });
 
@@ -440,13 +455,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // -------------------------------------------------------------
-    // Copy & Download Result TXT
+    // Copy & Download Result TXT (Full 100% Text)
     // -------------------------------------------------------------
     btnCopyResult.addEventListener('click', async () => {
-        if (!resultTextPreview.value) return;
+        const fullText = state.normalizedFullText || resultTextPreview.value;
+        if (!fullText) return;
         try {
-            await navigator.clipboard.writeText(resultTextPreview.value);
-            showToast('완성형 원고가 클립보드에 복사되었습니다!', 'success');
+            await navigator.clipboard.writeText(fullText);
+            showToast('전체 원고(100%)가 클립보드에 복사되었습니다!', 'success');
         } catch (e) {
             resultTextPreview.select();
             document.execCommand('copy');
@@ -455,10 +471,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     btnDownloadResult.addEventListener('click', () => {
-        if (!resultTextPreview.value) return;
+        const fullText = state.normalizedFullText || resultTextPreview.value;
+        if (!fullText) return;
         const origName = state.txtFile ? state.txtFile.name.replace(/\.txt$/i, '') : '원고';
         const downloadName = `[정규화]_${origName}.txt`;
-        downloadBlob(new Blob([resultTextPreview.value], { type: 'text/plain;charset=utf-8' }), downloadName);
+        downloadBlob(new Blob([fullText], { type: 'text/plain;charset=utf-8' }), downloadName);
         showToast(`"${downloadName}" 다운로드가 시작되었습니다.`, 'success');
     });
 
@@ -509,8 +526,9 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const options = {
                 paragraphSpacing: selectParagraphSpacing.value,
-                extractImages: checkExtractImages.checked,
-                handleRuby: checkHandleRuby.checked
+                rubyMode: selectRubyMode.value,
+                insertChapterTitles: checkInsertChapterTitles.checked,
+                extractImages: checkExtractImages.checked
             };
 
             const result = await epubExtractor.loadEpub(state.epubFile, options);
@@ -523,9 +541,17 @@ document.addEventListener('DOMContentLoaded', () => {
             epubMetaChapters.textContent = `${result.chapterCount}개 챕터`;
             epubMetaImages.textContent = `${result.imageCount}장 이미지`;
 
-            // Render Extracted Text
-            epubExtractedTextPreview.value = result.extractedText;
+            // Render Extracted Text (Smart 100-line preview)
+            epubExtractedTextPreview.value = result.previewText;
             extractedCharsCount.textContent = `총 ${result.extractedText.length.toLocaleString()} 자 추출됨`;
+            
+            const linesCount = result.extractedText.split('\n').length;
+            if (linesCount > 100) {
+                epubPreviewNoticeBadge.classList.remove('hidden');
+            } else {
+                epubPreviewNoticeBadge.classList.add('hidden');
+            }
+
             btnCopyEpubTxt.disabled = false;
             btnDownloadEpubTxt.disabled = false;
 
@@ -578,12 +604,13 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // EPUB Copy & Downloads
+    // EPUB Copy & Downloads (Full 100% Text)
     btnCopyEpubTxt.addEventListener('click', async () => {
-        if (!epubExtractedTextPreview.value) return;
+        const fullText = state.epubResult?.extractedText || epubExtractedTextPreview.value;
+        if (!fullText) return;
         try {
-            await navigator.clipboard.writeText(epubExtractedTextPreview.value);
-            showToast('순수 텍스트 원고가 복사되었습니다.', 'success');
+            await navigator.clipboard.writeText(fullText);
+            showToast('전체 순수 텍스트 원고(100%)가 복사되었습니다.', 'success');
         } catch (e) {
             epubExtractedTextPreview.select();
             document.execCommand('copy');
@@ -592,10 +619,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     btnDownloadEpubTxt.addEventListener('click', () => {
-        if (!epubExtractedTextPreview.value) return;
+        const fullText = state.epubResult?.extractedText || epubExtractedTextPreview.value;
+        if (!fullText) return;
         const title = (state.epubResult?.metadata?.title || '추출원고').replace(/[\\/:*?"<>|]/g, '_');
         const filename = `${title}.txt`;
-        downloadBlob(new Blob([epubExtractedTextPreview.value], { type: 'text/plain;charset=utf-8' }), filename);
+        downloadBlob(new Blob([fullText], { type: 'text/plain;charset=utf-8' }), filename);
         showToast(`"${filename}" 다운로드가 시작되었습니다.`, 'success');
     });
 

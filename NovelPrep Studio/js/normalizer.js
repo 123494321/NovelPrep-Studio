@@ -1,11 +1,15 @@
 /**
  * NovelPrep Studio - 소제목 정규화 & 순차 번호 주입 엔진
+ * Version: v1.2.1
  * 
  * [핵심 원칙]
  * 1. 단방향 순차 전진 탐색 (Sequential Forward Search):
  *    이전 소제목을 찾은 위치(lastIndex) 이후의 영역에서만 다음 소제목을 탐색합니다.
  *    본문 내 동음이의어/대화/복선에 의한 오매칭을 원천 방지합니다.
- * 2. 원문 100% 보존 원칙:
+ * 2. 독립 행 (줄 시작 ^) 필수화:
+ *    소제목은 반드시 줄의 맨 앞에서 시작해야 하며, 문장/대사 중간에 언급된 고유명사는
+ *    완벽히 무시하여 본문 오매칭을 차단합니다.
+ * 3. 원문 100% 보존 원칙:
  *    작가가 의도한 빈 줄(장면 전환 연출), 특수문자, 문장부호 등 본문 내용은
  *    단 1글자도 변경하지 않고, 오직 매칭된 소제목 위치에만 지정된 번호 서식을 삽입합니다.
  */
@@ -80,9 +84,9 @@ class ManuscriptNormalizer {
             escapedBase = escapedBase.replace(/\s+/g, '\\s*');
         }
 
-        // 전체 패턴: 줄 시작 또는 공백 이후, 그리고 줄 끝 또는 공백/특수문자
-        // 소제목 앞뒤로 흔히 붙는 기호(◆, ■, [소제목], <소제목>, # 등) 허용
-        const fullPattern = `([ \\t]*[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*)${escapedBase}${suffixRegex}([ \\t]*[\\]>]?[ \\t]*(?:\\r?\\n|$))`;
+        // 전체 패턴: 반드시 줄의 시작(^)에서 시작 (문장 중간에 삽입된 단어 오매칭 차단)
+        // 소제목 앞뒤로 흔히 붙는 기호(◆, ■, [소제목], <소제목>, # 등) 및 들여쓰기 공백 허용
+        const fullPattern = `^([ \\t]*[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*)${escapedBase}${suffixRegex}([ \\t]*[\\]>]?[ \\t]*(?:\\r?\\n|$))`;
 
         return new RegExp(fullPattern, 'm');
     }
@@ -222,4 +226,7 @@ class ManuscriptNormalizer {
 // 전역 객체 등록
 if (typeof window !== 'undefined') {
     window.ManuscriptNormalizer = ManuscriptNormalizer;
+}
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { ManuscriptNormalizer };
 }

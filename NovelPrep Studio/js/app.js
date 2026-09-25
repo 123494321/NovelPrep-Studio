@@ -1,9 +1,9 @@
 /**
  * NovelPrep Studio - Application Controller
- * Version: v1.2.0
+ * Version: v1.2.1
  */
 
-const APP_VERSION = 'v1.2.0';
+const APP_VERSION = 'v1.2.1';
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log(`%c🚀 NovelPrep Studio ${APP_VERSION} 가동 완료`, 'color: #6366f1; font-weight: bold; font-size: 14px;');

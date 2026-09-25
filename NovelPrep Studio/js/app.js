@@ -1,9 +1,9 @@
 /**
  * NovelPrep Studio - Application Controller
- * Version: v1.2.5
+ * Version: v1.2.6
  */
 
-const APP_VERSION = 'v1.2.5';
+const APP_VERSION = 'v1.2.6';
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log(`%c🚀 NovelPrep Studio ${APP_VERSION} 가동 완료`, 'color: #6366f1; font-weight: bold; font-size: 14px;');
@@ -516,10 +516,12 @@ document.addEventListener('DOMContentLoaded', () => {
     btnCopyResult.addEventListener('click', async () => {
         const fullText = state.normalizedFullText || resultTextPreview.value;
         if (!fullText) return;
+        const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n');
         try {
-            await navigator.clipboard.writeText(fullText);
+            await navigator.clipboard.writeText(cleanText);
             showToast('전체 원고(100%)가 클립보드에 복사되었습니다!', 'success');
         } catch (e) {
+            resultTextPreview.value = cleanText;
             resultTextPreview.select();
             document.execCommand('copy');
             showToast('클립보드에 복사되었습니다.', 'success');
@@ -529,9 +531,11 @@ document.addEventListener('DOMContentLoaded', () => {
     btnDownloadResult.addEventListener('click', () => {
         const fullText = state.normalizedFullText || resultTextPreview.value;
         if (!fullText) return;
+        // 윈도우 표준 줄바꿈(\r\n) 완벽 보장 (단독 \r 방지)
+        const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n');
         const origName = state.txtFile ? state.txtFile.name.replace(/\.txt$/i, '') : '원고';
         const downloadName = `[정규화]_${origName}.txt`;
-        downloadBlob(new Blob([fullText], { type: 'text/plain;charset=utf-8' }), downloadName);
+        downloadBlob(new Blob([cleanText], { type: 'text/plain;charset=utf-8' }), downloadName);
         showToast(`"${downloadName}" 다운로드가 시작되었습니다.`, 'success');
     });
 

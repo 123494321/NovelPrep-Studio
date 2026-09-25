@@ -1,17 +1,17 @@
 /**
  * NovelPrep Studio - 소제목 정규화 & 순차 번호 주입 엔진
- * Version: v1.2.5
+ * Version: v1.2.6 (Clean Standard Rollback & CRLF Stabilization)
  * 
  * [핵심 원칙]
  * 1. 단방향 순차 전진 탐색 (Sequential Forward Search):
  *    이전 소제목을 찾은 위치(lastIndex) 이후의 영역에서만 다음 소제목을 탐색합니다.
  *    본문 내 동음이의어/대화/복선에 의한 오매칭을 원천 방지합니다.
  * 2. 독립 행 (줄 시작 ^) 필수화:
- *    소제목은 반드시 줄의 맨 앞에서 시작해야 하며, 문장/대사 중간에 언급된 고유명사는
- *    완벽히 무시하여 본문 오매칭을 차단합니다.
- * 3. 원문 100% 보존 원칙:
- *    작가가 의도한 빈 줄(장면 전환 연출), 특수문자, 문장부호 등 본문 내용은
- *    단 1글자도 변경하지 않고, 오직 매칭된 소제목 위치에만 지정된 번호 서식을 삽입합니다.
+ *    소제목은 반드시 독립된 행(줄의 시작 ^)이어야 하며, 문장/대사 중간에 언급된
+ *    단어는 철저히 배제하여 원고 본문의 손상을 완벽히 차단합니다.
+ * 3. 원문 100% 보존 및 표준 개행(CRLF) 보장:
+ *    줄바꿈 경계를 깨뜨리지 않고, 최종 출력 시 윈도우 표준 CRLF(\r\n)로 완벽히 규격화하여
+ *    어떤 전자책 뷰어나 웹 툴에서도 100% 안정적으로 인식되도록 보장합니다.
  */
 
 class ManuscriptNormalizer {
@@ -33,11 +33,13 @@ class ManuscriptNormalizer {
     }
 
     /**
-     * 원본 원고 텍스트 설정
+     * 원본 원고 텍스트 설정 (모든 줄바꿈을 표준 \n으로 정돈하여 메모리에 적재)
      * @param {string} text 
      */
     setRawText(text) {
-        this.rawText = text || '';
+        // 모든 줄바꿈(\r\n, 단독 \r)을 표준 \n으로 통일하여 메모리에 적재
+        // 탐색/슬라이싱 중 \r이 단독 분리되는 버그를 원천 차단
+        this.rawText = (text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     }
 
     /**
@@ -48,7 +50,7 @@ class ManuscriptNormalizer {
     }
 
     /**
-     * 소제목 매칭용 정규식 패턴 생성
+     * 소제목 매칭용 정규식 패턴 생성 (군더더기 없는 표준 독립 행 패턴)
      * @param {string} title 
      * @param {object} options 
      * @returns {RegExp}
@@ -80,27 +82,22 @@ class ManuscriptNormalizer {
         }
 
         // 작가 본문 부가 주석/메모 유연 매칭 (예: (*약수정), [무료마지막회], [완결], [完] 등)
-        const annotationRegex = `(?:\\s*[\\(\\[<][^\\]\\)>\\r\\n]*(?:수정|무료|완결|完)[^\\]\\)>\\r\\n]*[\\]\\)>])?`;
+        const annotationRegex = `(?:\\s*[\\(\\[<][^\\]\\)>\\n]*(?:수정|무료|완결|完)[^\\]\\)>\\n]*[\\]\\)>])?`;
 
         let escapedBase = this.escapeRegExp(basePattern);
 
         if (ignoreSpaces) {
             // 글자 사이 공백을 \s* 로 치환하여 띄어쓰기 오차 허용
-            // 예: "깨어난 그림자" -> "깨\s*어\s*난\s*그\s*림\s*자"
             escapedBase = escapedBase.replace(/\s+/g, '\\s*');
         }
 
         // 선행 패턴(prefixGroup):
-        // 1) 줄 시작(^)에서 공백, ─+ 구분선, 기존 회차 번호([1], 1화 등), [#■◆◇▶▷●○※★☆\\[<] 허용
-        // 2) 또는 이전 회차 닫는 태그([>끝]) 뒤에 줄바꿈 없이 바로 붙은 경우
-        // 3) 또는 본문/작가의 말 문장 뒤에 줄바꿈 없이 바로 붙은 <소제목> 형태 허용
+        // 반드시 줄의 시작(^)에서 시작하며, 공백, 기존 회차 번호([1], 1화, 제1화, 1. 등), 장식 괄호([, < 등) 허용
         const existingEpPrefix = `(?:(?:\\[|\\(|<|제)?\\s*\\d+\\s*(?:화|장|편|회|\\.)?\\s*(?:\\]|\\)|>|\\.)?\\s*)?`;
-        const prefixGroup = `(^[ \\t]*(?:─+[ \\t]*)?${existingEpPrefix}[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*|(?:[>끝][ \\t]*[<]?[ \\t]*)|(?:[^\\r\\n][ \\t]*<[ \\t]*))`;
+        const prefixGroup = `(^[ \\t]*${existingEpPrefix}[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*)`;
 
-        // 후행 패턴(suffixGroup):
-        // 1) 줄바꿈 기호(\r?\n 또는 끝). 단, 이전 회차 끝 태그(<... > 끝)를 소제목 시작으로 오인하지 않도록 방지
-        // 2) 또는 구분선(─+) 등으로 인해 줄바꿈 없이 본문 첫 문장이 바로 이어진 경우((?=[^\r\n]))
-        const suffixGroup = `([ \\t]*[\\]>]?[ \\t]*(?!(?:끝|[完]))(?:\\r?\\n|$)|(?=[^\\r\\n]))`;
+        // 후행 패턴(suffixGroup): 닫는 장식 및 줄바꿈 기호(\n 또는 텍스트 끝)
+        const suffixGroup = `([ \\t]*[\\]>]?[ \\t]*(?:\\n|$))`;
 
         const fullPattern = `${prefixGroup}${escapedBase}${suffixRegex}${annotationRegex}${suffixGroup}`;
 
@@ -157,19 +154,9 @@ class ManuscriptNormalizer {
             const rawTitle = this.tocList[i];
             const pattern = this.buildSearchPattern(rawTitle, { flexSuffix, ignoreSpaces });
 
-            // 이전 탐색 완료 지점(lastSearchIndex) 이후의 슬라이스에서 검색
+            // 이전 탐색 완료 지점(lastSearchIndex) 이후의 슬라이스에서만 검색
             const remainingText = source.substring(lastSearchIndex);
             let match = pattern.exec(remainingText);
-
-            // 비표준 한글/인코딩 글자 깨짐 대응 지능형 안전 폴백 (예: 누구냗! vs 누구†d!)
-            if (!match && rawTitle.length >= 2) {
-                const prefix2 = this.escapeRegExp(rawTitle.substring(0, 2));
-                const fuzzyPattern = new RegExp(`(^[ \\t]*[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*|끝[ \\t]*<)[ \\t]*${prefix2}[^\\r\\n>\\]]{1,10}([ \\t]*[\\]>]?[ \\t]*(?:\\r?\\n|$))`, 'm');
-                const fMatch = fuzzyPattern.exec(remainingText);
-                if (fMatch) {
-                    match = fMatch;
-                }
-            }
 
             if (match) {
                 const matchOffsetInRemaining = match.index;
@@ -182,39 +169,14 @@ class ManuscriptNormalizer {
                 resultChunks.push(leadingOriginal);
 
                 // 2) 매칭된 제목을 새로운 정규화 형식으로 변환
-                let prefixDecor = match[1] || '';
+                // 후행 장식자 정리: 닫는 괄호(], >) 정리 후 원래 줄바꿈 유지
                 let suffixDecor = match[2] || '\n';
-                
-                // 특수 상황 처리 1: ──────── 기호가 앞에 붙어있던 경우, 지저분한 구분선을 지우고 소제목만 깔끔하게 주입
-                if (/─{2,}/.test(prefixDecor)) {
-                    prefixDecor = '';
-                } else if (/[>끝]/.test(prefixDecor)) {
-                    // 특수 상황 처리 2: 이전 회차 끝('끝' 또는 '>') 뒤에 줄바꿈 없이 붙은 경우 앞 회차 보존 후 개행
-                    const endingChar = prefixDecor.match(/[>끝]+/)[0];
-                    prefixDecor = endingChar + '\r\n\r\n';
-                } else if (/(?:^|\s|\[)(?:제\s*)?\d+[화장편회.]?\]?/.test(prefixDecor) || /^[ \t]*[\[<]?[ \t]*$/.test(prefixDecor)) {
-                    // 기존 회차 번호([1], 1화 등) 또는 단순 장식 괄호([, < 등)는 새 번호로 교체
-                    prefixDecor = '';
-                } else if (/[^ \t\r\n]/.test(prefixDecor)) {
-                    // 문장 뒤에 줄바꿈 없이 <소제목>이 붙은 경우 앞 문장 보존 후 개행
-                    const before = prefixDecor.replace(/[#■◆◇▶▷●○※★☆\\[<][ \\t]*$/, '');
-                    prefixDecor = before + '\r\n\r\n';
-                } else {
-                    prefixDecor = '';
-                }
-
-                // 후행 장식자 정리: 닫는 괄호(], >) 정리
                 suffixDecor = suffixDecor.replace(/^[ \t]*[\]>][ \t]*/, '');
-
-                // 특수 상황 처리 3: 소제목 뒤에 본문이 바로 이어진 경우(줄바꿈이 없던 경우), 본문 첫 문장을 다음 줄로 안전 분리
-                if (!/\r?\n$/.test(suffixDecor)) {
-                    suffixDecor = '\r\n\r\n' + suffixDecor;
-                }
 
                 const newTitle = this.formatEpisodeTitle(formatTemplate, currentEpisodeNum, rawTitle);
                 
-                // 원문의 줄바꿈 구조 유지: 선행/후행 공백 및 개행을 보존하며 제목만 교체
-                const replacedPart = `${prefixDecor}${newTitle}${suffixDecor}`;
+                // 원문의 줄바꿈 구조 완벽 보존
+                const replacedPart = `${newTitle}${suffixDecor}`;
                 resultChunks.push(replacedPart);
 
                 // 진단 데이터 기록
@@ -228,7 +190,7 @@ class ManuscriptNormalizer {
                     line: this.getLineNumber(source, absoluteStartIndex)
                 });
 
-                // 단방향 순차 전진: 다음 탐색은 현재 매칭이 끝난 위치 이후부터 시작!
+                // 단방향 순차 전진: 다음 탐색은 현재 매칭이 끝난 위치 이후부터 시작
                 lastSearchIndex = absoluteEndIndex;
                 currentEpisodeNum++;
             } else {
@@ -246,7 +208,10 @@ class ManuscriptNormalizer {
             resultChunks.push(source.substring(lastSearchIndex));
         }
 
-        this.normalizedText = resultChunks.join('');
+        // 최종 결과 텍스트: 모든 줄바꿈을 윈도우 표준 CRLF(\r\n)로 완벽하게 규격화하여 저장
+        const joined = resultChunks.join('');
+        this.normalizedText = joined.replace(/\n/g, '\r\n');
+
         this.diagnosticResult = {
             totalToc: this.tocList.length,
             successCount: matches.length,

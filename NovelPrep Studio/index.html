@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>NovelPrep Studio - 소설 원고 전처리 & EPUB 역변환 스튜디오</title>
+
+    <!-- Meta Tags -->
+    <meta name="description" content="소설 원고 목차 자동 수집, 단방향 순차 탐색 회차 번호 주입, 구형 EPUB 고품질 TXT 역변환 웹 툴">
+    <meta name="theme-color" content="#4f46e5">
+
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700&family=Pretendard:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- Stylesheets -->
+    <link rel="stylesheet" href="css/style.css">
+
+    <!-- JSZip for EPUB parsing & packaging (Offline first with CDN fallback) -->
+    <script src="libs/jszip.min.js"></script>
+    <script>
+        if (typeof JSZip === 'undefined') {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"><\/script>');
+        }
+    </script>
+</head>
+<body>
+
+    <!-- App Header -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="brand-icon">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                </div>
+                <div class="brand-text">
+                    <div class="brand-title">
+                        <span>NovelPrep Studio</span>
+                        <span class="badge badge-primary">v1.0</span>
+                    </div>
+                    <p class="brand-desc">소설 원고 전처리 & EPUB 역변환 스튜디오</p>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <button id="btnOpenHelpModal" class="btn btn-ghost" title="사용 가이드 및 원리 보기">
+                    <i class="fa-regular fa-circle-question"></i>
+                    <span>가이드</span>
+                </button>
+                <a href="../EPUB 웹 툴 제작/index.html" target="_blank" class="btn btn-outline-brand" title="완성된 원고로 전자책을 제작하는 EPUB Studio로 이동">
+                    <i class="fa-solid fa-book-open-reader"></i>
+                    <span>EPUB Studio 열기</span>
+                    <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- Main Navigation Tabs -->
+        <nav class="main-nav-tabs">
+            <button class="nav-tab active" data-tab="tab-normalizer">
+                <i class="fa-solid fa-list-ol"></i>
+                <div class="tab-label-group">
+                    <span class="tab-title">목차 자동 정규화 & 번호 주입</span>
+                    <span class="tab-sub">단방향 순차 전진 탐색 · 원문 연출 100% 보존</span>
+                </div>
+            </button>
+            <button class="nav-tab" data-tab="tab-epub-extractor">
+                <i class="fa-solid fa-file-zipper"></i>
+                <div class="tab-label-group">
+                    <span class="tab-title">구형 EPUB ➔ 순수 TXT 역변환</span>
+                    <span class="tab-sub">비표준 태그 정제 · 문단 복원 · 삽화 추출</span>
+                </div>
+            </button>
+        </nav>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="app-main">
+
+        <!-- ========================================== -->
+        <!-- TAB 1: 목차 자동 정규화 & 번호 주입기 -->
+        <!-- ========================================== -->
+        <section id="tab-normalizer" class="tab-pane active">
+
+            <!-- Information Banner -->
+            <div class="info-card">
+                <div class="info-card-icon"><i class="fa-solid fa-shield-halved"></i></div>
+                <div class="info-card-content">
+                    <h4>원문 100% 보존 & 단방향 순차 탐색 원칙</h4>
+                    <p>작가님이 의도한 <strong>빈 줄(장면 전환), 특수문자, 문장부호</strong>는 단 한 글자도 변경되지 않습니다. 이전 회차를 찾은 지점 <strong>이후 영역에서만 다음 회차를 탐색</strong>하므로 본문 중 동음이의어/대화/복선에 의한 오매칭을 근본적으로 차단합니다.</p>
+                </div>
+            </div>
+
+            <!-- Two-Column Workbench Layout -->
+            <div class="workbench-grid">
+
+                <!-- Left Column: 목차 수집 및 포맷 설정 -->
+                <div class="workbench-col col-toc">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <i class="fa-solid fa-list-check text-brand"></i>
+                                <span>1. 소제목(목차) 목록 준비</span>
+                            </div>
+                            <span id="tocCountBadge" class="badge badge-secondary">0개 등록됨</span>
+                        </div>
+
+                        <div class="panel-body">
+                            <!-- TOC Input Mode Selector -->
+                            <div class="sub-tabs" role="tablist">
+                                <button class="sub-tab active" data-subtab="toc-mode-url">
+                                    <i class="fa-solid fa-globe"></i> 링크(URL) 수집
+                                </button>
+                                <button class="sub-tab" data-subtab="toc-mode-text">
+                                    <i class="fa-solid fa-keyboard"></i> 직접 입력 / 붙여넣기
+                                </button>
+                                <button class="sub-tab" data-subtab="toc-mode-html">
+                                    <i class="fa-solid fa-code"></i> HTML 소스 파싱
+                                </button>
+                            </div>
+
+                            <!-- Subtab 1: URL Collection -->
+                            <div id="toc-mode-url" class="subtab-pane active">
+                                <div class="form-group">
+                                    <label for="inputNovelUrl">소설 연재 페이지 링크 (URL)</label>
+                                    <div class="input-with-button">
+                                        <input type="url" id="inputNovelUrl" placeholder="https://novel-site.com/series/12345" autocomplete="off">
+                                        <button id="btnFetchUrl" class="btn btn-primary">
+                                            <i class="fa-solid fa-arrow-down-to-bracket"></i> 수집
+                                        </button>
+                                    </div>
+                                    <div class="input-tip">
+                                        <span>* 사이트 CORS 보안 정책으로 직접 연결이 제한될 경우 아래 보조 수단을 이용하실 수 있습니다.</span>
+                                        <button id="btnShowBookmarkletHelp" class="link-btn">원클릭 북마크릿 안내</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Subtab 2: Direct Text Input -->
+                            <div id="toc-mode-text" class="subtab-pane">
+                                <div class="form-group">
+                                    <label for="inputTocText">소제목 목록 입력 <span class="text-muted">(한 줄에 1회차씩 입력)</span></label>
+                                    <textarea id="inputTocText" rows="6" placeholder="프롤로그&#10;깨어난 그림자&#10;두 번째 만남&#10;황혼의 결투"></textarea>
+                                    <div class="text-actions">
+                                        <button id="btnApplyTocText" class="btn btn-sm btn-secondary">목차 목록에 적용</button>
+                                        <button id="btnClearTocText" class="btn btn-sm btn-ghost">지우기</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Subtab 3: HTML Source Paste -->
+                            <div id="toc-mode-html" class="subtab-pane">
+                                <div class="form-group">
+                                    <label for="inputHtmlSource">연재 목록 페이지 HTML 소스 붙여넣기</label>
+                                    <textarea id="inputHtmlSource" rows="6" placeholder="웹 브라우저에서 '페이지 소스 보기' 또는 개발자 도구의 목차 HTML 태그를 복사하여 붙여넣으세요."></textarea>
+                                    <div class="text-actions">
+                                        <button id="btnParseHtmlSource" class="btn btn-sm btn-secondary">HTML에서 목차 추출</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Parsed TOC List Preview Box -->
+                            <div class="toc-preview-container">
+                                <div class="toc-preview-header">
+                                    <span>수집된 소제목 순서 (위에서 아래로 탐색)</span>
+                                    <button id="btnClearAllToc" class="link-btn danger-text">전체 비우기</button>
+                                </div>
+                                <div id="tocItemsList" class="toc-items-list">
+                                    <div class="empty-state">
+                                        <i class="fa-solid fa-inbox text-muted"></i>
+                                        <p>등록된 소제목이 없습니다.<br>위에서 링크나 텍스트로 목차를 등록해 주세요.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Format Options Box -->
+                            <div class="format-settings-card">
+                                <div class="card-subtitle">
+                                    <i class="fa-solid fa-sliders text-brand"></i>
+                                    <span>회차 번호 주입 서식 설정</span>
+                                </div>
+
+                                <div class="form-grid-2">
+                                    <div class="form-group">
+                                        <label for="selectNumberFormat">번호 주입 형식</label>
+                                        <select id="selectNumberFormat" class="form-select">
+                                            <option value="[{n}화]. {title}" selected>[{n}화]. 소제목 (EPUB Studio 최적 권장)</option>
+                                            <option value="제{n}화 {title}">제{n}화 소제목</option>
+                                            <option value="제{n}장 {title}">제{n}장 소제목</option>
+                                            <option value="{n}. {title}">{n}. 소제목</option>
+                                            <option value="{n}화 {title}">{n}화 소제목</option>
+                                            <option value="custom">직접 서식 입력</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="inputStartNumber">시작 회차 번호</label>
+                                        <input type="number" id="inputStartNumber" value="1" min="0" step="1">
+                                    </div>
+                                </div>
+
+                                <div id="customFormatGroup" class="form-group hidden">
+                                    <label for="inputCustomFormat">직접 지정 서식 템플릿 <span class="text-muted">({n}: 번호, {title}: 원문소제목)</span></label>
+                                    <input type="text" id="inputCustomFormat" placeholder="예: [제{n}화] - {title}">
+                                </div>
+
+                                <div class="options-checkbox-group">
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="checkFlexSuffix" checked>
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">소제목 뒤 부호 유연 매칭 <small class="text-muted">(예: '(1)', '[1]', '- 1' 등 소제목 끝 부호 변형 자동 감지)</small></span>
+                                    </label>
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="checkIgnoreSpaces" checked>
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">띄어쓰기 차이 허용 <small class="text-muted">('소제목 입니다'와 '소제목입니다' 동등 매칭)</small></span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: 원고 업로드 및 매칭 진단 -->
+                <div class="workbench-col col-manuscript">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <i class="fa-solid fa-file-lines text-brand"></i>
+                                <span>2. 소설 원고(.txt) 업로드 & 매칭</span>
+                            </div>
+                            <span id="fileInfoBadge" class="badge badge-outline">파일 대기 중</span>
+                        </div>
+
+                        <div class="panel-body">
+                            <!-- Dropzone for TXT -->
+                            <div id="txtDropzone" class="dropzone">
+                                <input type="file" id="inputTxtFile" accept=".txt" class="dropzone-input">
+                                <div class="dropzone-inner">
+                                    <div class="dropzone-icon">
+                                        <i class="fa-solid fa-cloud-arrow-up"></i>
+                                    </div>
+                                    <h4 class="dropzone-title">회차 번호 없는 소설 원고(.txt)를 드롭하세요</h4>
+                                    <p class="dropzone-desc">또는 여기를 클릭하여 컴퓨터에서 파일을 선택하세요</p>
+                                    <span class="dropzone-support">지원 인코딩: UTF-8, CP949(EUC-KR) 자동 감지</span>
+                                </div>
+                            </div>
+
+                            <!-- File Stats (Hidden initially) -->
+                            <div id="fileStatsContainer" class="file-stats-bar hidden">
+                                <div class="file-stat-item">
+                                    <span class="stat-label">파일명:</span>
+                                    <strong id="statFileName" class="stat-value">-</strong>
+                                </div>
+                                <div class="file-stat-item">
+                                    <span class="stat-label">용량:</span>
+                                    <strong id="statFileSize" class="stat-value">-</strong>
+                                </div>
+                                <div class="file-stat-item">
+                                    <span class="stat-label">글자 수:</span>
+                                    <strong id="statCharCount" class="stat-value">-</strong>
+                                </div>
+                                <div class="file-stat-item">
+                                    <span class="stat-label">총 줄 수:</span>
+                                    <strong id="statLineCount" class="stat-value">-</strong>
+                                </div>
+                            </div>
+
+                            <!-- Execution Action Button -->
+                            <div class="action-btn-wrapper">
+                                <button id="btnRunNormalization" class="btn btn-action-hero" disabled>
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                    <span>단방향 순차 탐색 번호 주입 실행</span>
+                                </button>
+                            </div>
+
+                            <!-- Matching Result Diagnostic Board -->
+                            <div id="matchDiagnosticCard" class="diagnostic-card hidden">
+                                <div class="diagnostic-header">
+                                    <div class="diagnostic-title">
+                                        <i class="fa-solid fa-chart-pie text-brand"></i>
+                                        <span>매칭 분석 결과 리포트</span>
+                                    </div>
+                                    <div class="diagnostic-stats">
+                                        <span id="badgeSuccessCount" class="badge badge-success">매칭 성공 0개</span>
+                                        <span id="badgeMissingCount" class="badge badge-danger">미발견 0개</span>
+                                    </div>
+                                </div>
+
+                                <!-- Unmatched Warnings Alert -->
+                                <div id="unmatchedAlert" class="alert-box alert-warning hidden">
+                                    <i class="fa-solid fa-triangle-exclamation alert-icon"></i>
+                                    <div class="alert-content">
+                                        <strong>본문에서 발견되지 않은 소제목이 있습니다:</strong>
+                                        <ul id="unmatchedList" class="unmatched-list"></ul>
+                                        <span class="alert-tip">오탈자나 본문의 제목 표기가 목차와 크게 다른지 확인해 주세요.</span>
+                                    </div>
+                                </div>
+
+                                <!-- Sequential Matching Timeline Preview -->
+                                <div class="matching-log-container">
+                                    <span class="log-title">단방향 순차 매칭 내역 (클릭 시 해당 위치로 이동)</span>
+                                    <div id="matchingLogList" class="matching-log-list"></div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Full-Width Bottom: Preview & Download Panel -->
+            <div id="resultPreviewPanel" class="result-panel hidden">
+                <div class="result-header">
+                    <div class="result-title">
+                        <i class="fa-solid fa-eye text-brand"></i>
+                        <span>번호가 주입된 완성형 원고 미리보기</span>
+                        <span class="badge badge-success"><i class="fa-solid fa-check"></i> 원문 연출 100% 보존 완료</span>
+                    </div>
+                    <div class="result-actions">
+                        <button id="btnCopyResult" class="btn btn-secondary" title="클립보드에 전체 복사">
+                            <i class="fa-regular fa-copy"></i> 복사
+                        </button>
+                        <button id="btnDownloadResult" class="btn btn-success" title="정규화된 TXT 파일로 다운로드">
+                            <i class="fa-solid fa-download"></i> 완성 원고(.txt) 다운로드
+                        </button>
+                    </div>
+                </div>
+
+                <div class="result-body">
+                    <textarea id="resultTextPreview" class="code-preview" readonly></textarea>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ========================================== -->
+        <!-- TAB 2: 구형 EPUB ➔ 순수 TXT 역변환기 -->
+        <!-- ========================================== -->
+        <section id="tab-epub-extractor" class="tab-pane">
+
+            <!-- Information Banner -->
+            <div class="info-card info-card-blue">
+                <div class="info-card-icon"><i class="fa-solid fa-file-shield"></i></div>
+                <div class="info-card-content">
+                    <h4>비표준 태그 정제 & 원본 문단 호흡 완벽 복원</h4>
+                    <p>과거 구형 툴이나 외부에서 제작된 <code>.epub</code> 전자책에서 <strong>난잡한 HTML 태그, 불필요한 인라인 스타일, 엔티티를 정제</strong>하고 본래 작가의 문단 호흡을 살린 순수 <code>.txt</code>로 복원합니다. 표지 및 내부 삽화 이미지도 원본 그대로 분리 추출됩니다.</p>
+                </div>
+            </div>
+
+            <div class="workbench-grid">
+
+                <!-- Left Column: EPUB 업로드 & 옵션 -->
+                <div class="workbench-col col-epub-upload">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <i class="fa-solid fa-file-zipper text-brand"></i>
+                                <span>구형 전자책(.epub) 업로드</span>
+                            </div>
+                        </div>
+
+                        <div class="panel-body">
+                            <!-- EPUB Dropzone -->
+                            <div id="epubDropzone" class="dropzone dropzone-epub">
+                                <input type="file" id="inputEpubFile" accept=".epub" class="dropzone-input">
+                                <div class="dropzone-inner">
+                                    <div class="dropzone-icon text-cyan">
+                                        <i class="fa-solid fa-book-journal-whills"></i>
+                                    </div>
+                                    <h4 class="dropzone-title">구형 .epub 전자책 파일을 드롭하세요</h4>
+                                    <p class="dropzone-desc">또는 여기를 클릭하여 파일을 선택하세요</p>
+                                    <span class="dropzone-support">표준 및 비표준 EPUB 2 / EPUB 3 전체 지원</span>
+                                </div>
+                            </div>
+
+                            <!-- EPUB Metadata Card (Hidden initially) -->
+                            <div id="epubMetaCard" class="meta-card hidden">
+                                <div class="meta-row">
+                                    <span class="meta-label">도서 제목:</span>
+                                    <strong id="epubMetaTitle" class="meta-value">-</strong>
+                                </div>
+                                <div class="meta-row">
+                                    <span class="meta-label">저자명:</span>
+                                    <strong id="epubMetaCreator" class="meta-value">-</strong>
+                                </div>
+                                <div class="meta-row">
+                                    <span class="meta-label">추출된 챕터:</span>
+                                    <span id="epubMetaChapters" class="badge badge-secondary">0개</span>
+                                </div>
+                                <div class="meta-row">
+                                    <span class="meta-label">발견된 이미지:</span>
+                                    <span id="epubMetaImages" class="badge badge-secondary">0장</span>
+                                </div>
+                            </div>
+
+                            <!-- Conversion Options -->
+                            <div class="format-settings-card">
+                                <div class="card-subtitle">
+                                    <i class="fa-solid fa-gear text-brand"></i>
+                                    <span>텍스트 정제 및 복원 옵션</span>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="selectParagraphSpacing">문단 줄바꿈 호흡</label>
+                                    <select id="selectParagraphSpacing" class="form-select">
+                                        <option value="standard" selected>표준 줄바꿈 (문단 사이 빈 줄 1줄 유지 - 웹소설 최적)</option>
+                                        <option value="single">단일 줄바꿈 (빈 줄 없이 엔터만 유지)</option>
+                                        <option value="raw">원본 태그 구조 그대로 유지</option>
+                                    </select>
+                                </div>
+
+                                <div class="options-checkbox-group">
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="checkExtractImages" checked>
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">내부 이미지(표지·삽화) 함께 추출</span>
+                                    </label>
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="checkHandleRuby" checked>
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">루비 태그(&lt;ruby&gt;) 독음 정리 <small class="text-muted">(한자[독음] 형태로 깔끔 변환)</small></span>
+                                    </label>
+                                    <label class="custom-checkbox">
+                                        <input type="checkbox" id="checkInsertChapterTitles" checked>
+                                        <span class="checkmark"></span>
+                                        <span class="label-text">TOC 목차명으로 챕터 소제목 자동 보완</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Extract Action Button -->
+                            <div class="action-btn-wrapper">
+                                <button id="btnRunEpubExtraction" class="btn btn-action-hero btn-cyan" disabled>
+                                    <i class="fa-solid fa-file-export"></i>
+                                    <span>순수 TXT 및 이미지 역변환 실행</span>
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Right Column: 추출 결과 뷰어 -->
+                <div class="workbench-col col-epub-result">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div class="panel-title">
+                                <i class="fa-solid fa-square-poll-horizontal text-brand"></i>
+                                <span>추출 결과 미리보기</span>
+                            </div>
+                            <div class="panel-header-actions">
+                                <div class="mini-tab-group">
+                                    <button class="mini-tab active" data-eprev="text">텍스트 원고</button>
+                                    <button class="mini-tab" data-eprev="images">이미지 갤러리 (<span id="galleryCount">0</span>)</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="panel-body">
+                            <!-- Text Pane -->
+                            <div id="eprev-text" class="eprev-pane active">
+                                <div class="text-pane-header">
+                                    <span id="extractedCharsCount" class="text-muted">추출 대기 중...</span>
+                                    <button id="btnCopyEpubTxt" class="btn btn-sm btn-secondary" disabled>
+                                        <i class="fa-regular fa-copy"></i> 복사
+                                    </button>
+                                </div>
+                                <textarea id="epubExtractedTextPreview" class="code-preview" placeholder="EPUB 파일을 업로드하고 역변환을 실행하면 정제된 순수 텍스트가 여기에 표시됩니다." readonly></textarea>
+                            </div>
+
+                            <!-- Images Pane -->
+                            <div id="eprev-images" class="eprev-pane">
+                                <div id="epubImagesGallery" class="images-gallery">
+                                    <div class="empty-state">
+                                        <i class="fa-regular fa-images text-muted"></i>
+                                        <p>추출된 이미지가 없습니다.</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Download Buttons Group -->
+                            <div class="export-actions-card">
+                                <button id="btnDownloadEpubTxt" class="btn btn-success" disabled>
+                                    <i class="fa-solid fa-file-arrow-down"></i>
+                                    <span>순수 원고(.txt) 다운로드</span>
+                                </button>
+                                <button id="btnDownloadEpubImages" class="btn btn-primary" disabled>
+                                    <i class="fa-solid fa-file-zipper"></i>
+                                    <span>삽화 이미지 ZIP 다운로드</span>
+                                </button>
+                                <button id="btnDownloadEpubAllZip" class="btn btn-secondary" disabled>
+                                    <i class="fa-solid fa-box-archive"></i>
+                                    <span>통합 패키지(.zip) 다운로드</span>
+                                </button>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- Help & Guide Modal -->
+    <div id="helpModal" class="modal-overlay hidden">
+        <div class="modal-card">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i class="fa-solid fa-circle-question text-brand"></i>
+                    <span>NovelPrep Studio 사용 가이드</span>
+                </div>
+                <button id="btnCloseHelpModal" class="btn-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <section class="guide-section">
+                    <h4>1. 단방향 순차 전진 탐색(Sequential Forward Search)이란?</h4>
+                    <p>장편 소설 원고에서는 소제목과 같은 단어가 본문 대화나 복선, 서술에 우연히 등장할 수 있습니다. NovelPrep Studio는 이전 회차 소제목이 매칭된 위치 <strong>이후 영역에서만 다음 회차를 탐색</strong>하므로 오매칭을 완벽히 방지합니다.</p>
+                </section>
+                <section class="guide-section">
+                    <h4>2. 소설 연재 목록 링크 수집 팁</h4>
+                    <p>웹 브라우저의 보안 정책(CORS)으로 인해 일부 연재 플랫폼의 링크 직접 수집이 제한될 수 있습니다. 이 경우 아래의 북마크릿을 즐겨찾기에 등록한 후 연재 목록 페이지에서 클릭하면 소제목 목록이 자동으로 클립보드에 복사됩니다.</p>
+                    <div class="code-box">
+                        <code>javascript:(function(){const titles=Array.from(document.querySelectorAll('.title, .episode-title, [class*="title"], td.subject a')).map(e=>e.innerText.trim()).filter(Boolean);if(titles.length){navigator.clipboard.writeText(titles.join('\n')).then(()=>alert(`${titles.length}개 소제목 복사 완료!`));}else{alert('소제목을 찾지 못했습니다.');}})();</code>
+                    </div>
+                </section>
+                <section class="guide-section">
+                    <h4>3. EPUB Studio (v2.2.5) 연계</h4>
+                    <p>NovelPrep Studio에서 정돈된 <code>[1화]. 소제목</code> 형태의 원고를 생성한 뒤, <a href="../EPUB 웹 툴 제작/index.html" target="_blank" class="link-btn">EPUB Studio</a>에 업로드하면 목차 패턴 분석 클릭 한 번으로 완벽한 표준 전자책을 1분 만에 완성할 수 있습니다.</p>
+                </section>
+            </div>
+            <div class="modal-footer">
+                <button id="btnConfirmHelpModal" class="btn btn-primary">확인했습니다</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Scripts -->
+    <script src="js/normalizer.js"></script>
+    <script src="js/epub_extractor.js"></script>
+    <script src="js/url_fetcher.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

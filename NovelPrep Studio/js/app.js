@@ -1,8 +1,13 @@
 /**
  * NovelPrep Studio - Application Controller
+ * Version: v1.1.0
  */
 
+const APP_VERSION = 'v1.1.0';
+
 document.addEventListener('DOMContentLoaded', () => {
+    console.log(`%c🚀 NovelPrep Studio ${APP_VERSION} 가동 완료`, 'color: #6366f1; font-weight: bold; font-size: 14px;');
+
     // -------------------------------------------------------------
     // Core Instances & State
     // -------------------------------------------------------------
@@ -129,6 +134,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const epubTab = document.querySelector('.nav-tab[data-tab="tab-epub-extractor"]');
         if (epubTab) epubTab.click();
     }
+
+    // Version Loaded Toast
+    setTimeout(() => {
+        showToast(`NovelPrep Studio ${APP_VERSION}이(가) 성공적으로 로드되었습니다.`, 'info');
+    }, 300);
 
     // -------------------------------------------------------------
     // TOC Sub-tabs Switching

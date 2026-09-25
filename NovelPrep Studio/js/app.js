@@ -43,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const tocItemsList = document.getElementById('tocItemsList');
     const tocCountBadge = document.getElementById('tocCountBadge');
     const btnClearAllToc = document.getElementById('btnClearAllToc');
+    const btnReverseToc = document.getElementById('btnReverseToc');
+    const checkExcludeNotices = document.getElementById('checkExcludeNotices');
 
     // Tab 1: Format Options
     const selectNumberFormat = document.getElementById('selectNumberFormat');
@@ -261,13 +263,25 @@ document.addEventListener('DOMContentLoaded', () => {
             showToast('HTML 소스를 붙여넣어 주세요.', 'warning');
             return;
         }
-        const parsed = UrlTocFetcher.parseTocFromHtml(html);
+        const excludeNotices = checkExcludeNotices.checked;
+        const parsed = UrlTocFetcher.parseTocFromHtml(html, { excludeNotices });
         if (parsed.length === 0) {
             showToast('붙여넣은 HTML에서 목차 소제목을 찾지 못했습니다.', 'warning');
         } else {
             updateTocList(parsed, false);
-            showToast(`${parsed.length}개의 소제목을 추출하여 등록했습니다!`, 'success');
+            showToast(`${parsed.length}개의 소제목을 성공적으로 추출하여 등록했습니다!`, 'success');
         }
+    });
+
+    // Reverse TOC Order
+    btnReverseToc.addEventListener('click', () => {
+        if (state.tocItems.length < 2) {
+            showToast('뒤집을 소제목이 2개 이상 있어야 합니다.', 'warning');
+            return;
+        }
+        state.tocItems.reverse();
+        renderTocList();
+        showToast('소제목 목록 순서를 반대로 뒤집었습니다. (첫화 ⇋ 최신화)', 'info');
     });
 
     // Clear All TOC

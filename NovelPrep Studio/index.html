@@ -153,9 +153,14 @@
                             <!-- Subtab 3: HTML Source Paste -->
                             <div id="toc-mode-html" class="subtab-pane">
                                 <div class="form-group">
-                                    <label for="inputHtmlSource">연재 목록 페이지 HTML 소스 붙여넣기</label>
-                                    <textarea id="inputHtmlSource" rows="6" placeholder="웹 브라우저에서 '페이지 소스 보기' 또는 개발자 도구의 목차 HTML 태그를 복사하여 붙여넣으세요."></textarea>
-                                    <div class="text-actions">
+                                    <label for="inputHtmlSource">연재 목록 페이지 HTML 소스 붙여넣기 (노벨피아/네이버시리즈/문피아 자동 감지)</label>
+                                    <textarea id="inputHtmlSource" rows="6" placeholder="웹 브라우저에서 목차 영역이나 페이지 전체 소스를 복사하여 붙여넣으세요. 노벨피아, 네이버 시리즈, 문피아 등 플랫폼을 자동 인식하여 회차명만 추출합니다."></textarea>
+                                    <div class="text-actions" style="display: flex; justify-content: space-between; align-items: center;">
+                                        <label class="custom-checkbox" style="font-size: 0.8rem;">
+                                            <input type="checkbox" id="checkExcludeNotices" checked>
+                                            <span class="checkmark"></span>
+                                            <span>공지사항/일러스트공지 자동 제외</span>
+                                        </label>
                                         <button id="btnParseHtmlSource" class="btn btn-sm btn-secondary">HTML에서 목차 추출</button>
                                     </div>
                                 </div>
@@ -165,7 +170,10 @@
                             <div class="toc-preview-container">
                                 <div class="toc-preview-header">
                                     <span>수집된 소제목 순서 (위에서 아래로 탐색)</span>
-                                    <button id="btnClearAllToc" class="link-btn danger-text">전체 비우기</button>
+                                    <div style="display: flex; gap: 10px;">
+                                        <button id="btnReverseToc" class="link-btn" title="목차 순서를 반대로 뒤집습니다 (최신화순 ⇋ 1화순)"><i class="fa-solid fa-arrows-up-down"></i> 순서 뒤집기</button>
+                                        <button id="btnClearAllToc" class="link-btn danger-text">전체 비우기</button>
+                                    </div>
                                 </div>
                                 <div id="tocItemsList" class="toc-items-list">
                                     <div class="empty-state">
@@ -532,10 +540,12 @@
                     <p>장편 소설 원고에서는 소제목과 같은 단어가 본문 대화나 복선, 서술에 우연히 등장할 수 있습니다. NovelPrep Studio는 이전 회차 소제목이 매칭된 위치 <strong>이후 영역에서만 다음 회차를 탐색</strong>하므로 오매칭을 완벽히 방지합니다.</p>
                 </section>
                 <section class="guide-section">
-                    <h4>2. 소설 연재 목록 링크 수집 팁</h4>
-                    <p>웹 브라우저의 보안 정책(CORS)으로 인해 일부 연재 플랫폼의 링크 직접 수집이 제한될 수 있습니다. 이 경우 아래의 북마크릿을 즐겨찾기에 등록한 후 연재 목록 페이지에서 클릭하면 소제목 목록이 자동으로 클립보드에 복사됩니다.</p>
+                    <h4>2. 주요 플랫폼별 1초 원클릭 북마크릿</h4>
+                    <p>웹 브라우저의 보안 정책(CORS)으로 인해 외부 연재 플랫폼의 링크 직접 수집이 제한될 때 사용합니다. 아래 코드를 브라우저 북마크(즐겨찾기)의 URL에 등록한 후, 연재 사이트에서 클릭하시면 전체 소제목이 자동으로 복사됩니다.</p>
+                    
+                    <p style="margin-top: 10px; font-weight: 600; color: #fff;">[통합 만능 북마크릿 - 노벨피아 / 네이버 시리즈 / 문피아 공용]</p>
                     <div class="code-box">
-                        <code>javascript:(function(){const titles=Array.from(document.querySelectorAll('.title, .episode-title, [class*="title"], td.subject a')).map(e=>e.innerText.trim()).filter(Boolean);if(titles.length){navigator.clipboard.writeText(titles.join('\n')).then(()=>alert(`${titles.length}개 소제목 복사 완료!`));}else{alert('소제목을 찾지 못했습니다.');}})();</code>
+                        <code>javascript:(function(){const s=['td[onclick*="/viewer/"] b','tr.ep_style td.font12 b','a[class*="launchViewerForPreview"] strong','ul.lst_thum li a strong','.volume_lst li a strong','td.subject a','.episode_item .title','.list_episode li a','.chapter_title'];let titles=[];for(const sel of s){const els=document.querySelectorAll(sel);if(els.length>=2){titles=Array.from(els).map(e=>e.innerText.trim()).filter(Boolean);break;}}if(!titles.length){titles=Array.from(document.querySelectorAll('.title, .episode-title, [class*="title"]')).map(e=>e.innerText.trim()).filter(Boolean);}if(titles.length){navigator.clipboard.writeText(titles.join('\n')).then(()=>alert(`[성공] ${titles.length}개 소제목 목록이 클립보드에 복사되었습니다!\nNovelPrep Studio에 붙여넣으세요.`));}else{alert('페이지에서 목차를 찾지 못했습니다.');}})();</code>
                     </div>
                 </section>
                 <section class="guide-section">

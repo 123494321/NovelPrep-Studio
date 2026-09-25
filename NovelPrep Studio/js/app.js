@@ -1,9 +1,9 @@
 /**
  * NovelPrep Studio - Application Controller
- * Version: v1.1.0
+ * Version: v1.2.0
  */
 
-const APP_VERSION = 'v1.1.0';
+const APP_VERSION = 'v1.2.0';
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log(`%c🚀 NovelPrep Studio ${APP_VERSION} 가동 완료`, 'color: #6366f1; font-weight: bold; font-size: 14px;');
@@ -38,6 +38,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tab 1: TOC Controls
     const subTabs = document.querySelectorAll('.sub-tab');
     const subtabPanes = document.querySelectorAll('.subtab-pane');
+    const inputSmartDirtyText = document.getElementById('inputSmartDirtyText');
+    const checkRemoveEpPrefix = document.getElementById('checkRemoveEpPrefix');
+    const btnClearSmartText = document.getElementById('btnClearSmartText');
+    const btnRunSmartClean = document.getElementById('btnRunSmartClean');
     const inputNovelUrl = document.getElementById('inputNovelUrl');
     const btnFetchUrl = document.getElementById('btnFetchUrl');
     const inputTocText = document.getElementById('inputTocText');
@@ -215,6 +219,33 @@ document.addEventListener('DOMContentLoaded', () => {
                 renderTocList();
                 checkReadyToNormalize();
             });
+        });
+    }
+
+    // 0) Smart Text Cleaner (Primary Mode - v1.2.0)
+    if (btnRunSmartClean) {
+        btnRunSmartClean.addEventListener('click', () => {
+            const rawText = inputSmartDirtyText ? inputSmartDirtyText.value.trim() : '';
+            if (!rawText) {
+                showToast('정제할 텍스트를 붙여넣어 주세요.', 'warning');
+                if (inputSmartDirtyText) inputSmartDirtyText.focus();
+                return;
+            }
+            const removePrefix = checkRemoveEpPrefix ? checkRemoveEpPrefix.checked : true;
+            const cleanedTitles = SmartTextCleaner.clean(rawText, { removeEpisodePrefix: removePrefix });
+
+            if (cleanedTitles.length === 0) {
+                showToast('유효한 소제목을 찾지 못했습니다. 텍스트 형식을 확인해 주세요.', 'warning');
+            } else {
+                updateTocList(cleanedTitles, false);
+                showToast(`⚡ ${cleanedTitles.length}개의 소제목이 1초 만에 깔끔하게 정제되었습니다!`, 'success');
+            }
+        });
+    }
+
+    if (btnClearSmartText) {
+        btnClearSmartText.addEventListener('click', () => {
+            if (inputSmartDirtyText) inputSmartDirtyText.value = '';
         });
     }
 
@@ -685,10 +716,10 @@ document.addEventListener('DOMContentLoaded', () => {
         helpModal.classList.add('hidden');
     }
 
-    btnOpenHelpModal.addEventListener('click', openHelpModal);
-    btnShowBookmarkletHelp.addEventListener('click', openHelpModal);
-    btnCloseHelpModal.addEventListener('click', closeHelpModal);
-    btnConfirmHelpModal.addEventListener('click', closeHelpModal);
+    if (btnOpenHelpModal) btnOpenHelpModal.addEventListener('click', openHelpModal);
+    if (btnShowBookmarkletHelp) btnShowBookmarkletHelp.addEventListener('click', openHelpModal);
+    if (btnCloseHelpModal) btnCloseHelpModal.addEventListener('click', closeHelpModal);
+    if (btnConfirmHelpModal) btnConfirmHelpModal.addEventListener('click', closeHelpModal);
 
     helpModal.addEventListener('click', (e) => {
         if (e.target === helpModal) closeHelpModal();

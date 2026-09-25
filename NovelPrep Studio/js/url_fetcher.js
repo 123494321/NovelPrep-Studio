@@ -1,37 +1,216 @@
 /**
- * NovelPrep Studio - 목차 URL 수집 및 플랫폼별 정밀 파서 엔진
+ * NovelPrep Studio - 만능 스마트 텍스트 정제 및 목차 추출 엔진
+ * Version: v1.2.0
  * 
- * [지원 플랫폼 정밀 분석]
- * 1. 노벨피아 (Novelpia):
- *    - table.notice_table, td[onclick*="/viewer/"] b, tr[class*="ep_style"] td.font12 b
- *    - 공지사항(일러스트, 휴재공지 등) 자동 식별
- * 2. 네이버 시리즈 (Naver Series):
- *    - a[class*="launchViewerForPreview"], ul.lst_thum li a, .volume_lst li a
- *    - <span>작품명</span> 제거 후 <strong>1화 / 회차명</strong>만 정밀 추출
- * 3. 문피아 (Munpia):
- *    - td.subject a, .episode_item .title, .list_episode li a
- * 4. 조아라, 카카오페이지 등 범용 웹소설 플랫폼
+ * [핵심 기능]
+ * 1. SmartTextCleaner: 사용자가 문피아, 네이버 시리즈, 카카오페이지, 노벨피아 등에서
+ *    마우스로 아무렇게나 마구 긁어온 텍스트(조회수, 날짜, 무료, 댓글수, 링크 등 잡동사니 포함)를
+ *    1초 만에 100% 순수한 소제목 목록으로 완벽 정제합니다.
+ * 2. UrlTocFetcher: 웹 페이지 URL 수집(CORS 프록시 자동 폴백) 및 HTML 소스 파서.
  */
 
-class UrlTocFetcher {
+class SmartTextCleaner {
     /**
-     * URL을 기반으로 대상 플랫폼 식별
-     * @param {string} url 
-     * @returns {'novelpia'|'naver'|'munpia'|'generic'}
+     * 마구 복사한 텍스트에서 순수 소제목 목록만 스마트하게 추출
+     * @param {string} rawText 
+     * @param {object} options { removeEpisodePrefix: boolean }
+     * @returns {string[]}
      */
-    static detectPlatform(url) {
-        if (!url) return 'generic';
-        const lower = url.toLowerCase();
-        if (lower.includes('novelpia.com')) return 'novelpia';
-        if (lower.includes('series.naver.com') || lower.includes('naver.com')) return 'naver';
-        if (lower.includes('munpia.com')) return 'munpia';
-        if (lower.includes('joara.com')) return 'joara';
-        if (lower.includes('kakaopage') || lower.includes('kakao.com')) return 'kakao';
-        return 'generic';
+    static clean(rawText, options = {}) {
+        if (!rawText) return [];
+
+        const { removeEpisodePrefix = true } = options;
+        const lines = rawText.split(/\r?\n/).map(l => l.trim());
+        let result = [];
+
+        // 1. 문피아 드래그 복사 패턴 검사
+        // [숫자] \n [.] \n [소제목] \n [날짜/조회수/좋아요/글자수/무료]
+        const isMunpia = this.checkMunpiaPattern(lines);
+        if (isMunpia) {
+            result = this.parseMunpiaLines(lines);
+            if (result.length > 0) return this.finalize(result, removeEpisodePrefix);
+        }
+
+        // 2. 카카오페이지 마크다운 링크 패턴 검사
+        // [작품명 N화날짜무료](https://...)
+        const isKakao = lines.some(l => /\[.*?(\d+\s*화|프롤로그|에필로그).*?\]\(https?:\/\//.test(l) || /\[.*?(\d+\s*화).*?\d{2}\.\d{2}\.\d{2}.*?\]/.test(l));
+        if (isKakao) {
+            result = this.parseKakaoLines(lines);
+            if (result.length > 0) return this.finalize(result, removeEpisodePrefix);
+        }
+
+        // 3. 네이버 시리즈 / 일반 회차 줄바꿈 패턴 검사
+        // 예: 1화 재능 먹는 플레이어 (1) (2020.07.29.)
+        result = this.parseSeriesAndGenericLines(lines);
+
+        return this.finalize(result, removeEpisodePrefix);
     }
 
     /**
-     * 다중 CORS 프록시 체인을 통한 HTML 수집
+     * 문피아 패턴 여부 확인
+     */
+    static checkMunpiaPattern(lines) {
+        for (let i = 0; i < lines.length - 2; i++) {
+            if (/^\d+$/.test(lines[i]) && lines[i + 1] === '.' && lines[i + 2].length > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 문피아 패턴 라인 파싱
+     */
+    static parseMunpiaLines(lines) {
+        const titles = [];
+        for (let i = 0; i < lines.length - 2; i++) {
+            if (/^\d+$/.test(lines[i]) && lines[i + 1] === '.') {
+                const titleCandidate = lines[i + 2];
+                // 잡음 단어가 아닌 실제 소제목인지 검증
+                if (titleCandidate && !this.isNoiseLine(titleCandidate)) {
+                    titles.push(titleCandidate);
+                }
+            }
+        }
+        return titles;
+    }
+
+    /**
+     * 카카오페이지 마크다운 링크 라인 파싱
+     */
+    static parseKakaoLines(lines) {
+        const titles = [];
+        for (const line of lines) {
+            if (!line) continue;
+            const match = line.match(/\[(.*?)\]/);
+            if (match) {
+                let inner = match[1];
+                // 날짜 제거 (예: 21.07.23, 2021.07.23)
+                inner = inner.replace(/\d{2,4}\.\d{2}\.\d{2}.*$/, '').trim();
+                // 무료, 유료 등 부가 단어 제거
+                inner = inner.replace(/무료|유료|소장|대여|기다무/g, '').trim();
+
+                // 회차 번호나 소제목 분리
+                const epMatch = inner.match(/(\d+\s*화.*)$/);
+                if (epMatch) {
+                    titles.push(epMatch[1].trim());
+                } else if (inner.length > 0) {
+                    titles.push(inner.trim());
+                }
+            }
+        }
+        return titles;
+    }
+
+    /**
+     * 네이버 시리즈 및 일반 패턴 라인 파싱
+     */
+    static parseSeriesAndGenericLines(lines) {
+        const titles = [];
+
+        for (const line of lines) {
+            if (!line) continue;
+            if (this.isNoiseLine(line)) continue;
+
+            let cleaned = line;
+
+            // 1) 마크다운 링크 [제목](링크) 형태인 경우 제목만 추출
+            const mdMatch = cleaned.match(/^\[(.*?)\]\(https?:\/\/[^\)]+\)$/);
+            if (mdMatch) {
+                cleaned = mdMatch[1];
+            }
+
+            // 2) 끝부분 무료/유료/다운로드/소장/대여/구매 태그 먼저 제거
+            cleaned = cleaned.replace(/\s*(무료|유료|대여|소장|다운로드|구매)\s*$/g, '');
+
+            // 3) 끝부분 날짜 제거: (2020.07.29.), 2020.07.29, 21.07.23 등
+            cleaned = cleaned.replace(/\s*\(\s*\d{2,4}\.\d{2}\.\d{2}\.?\s*\)\s*$/g, '');
+            cleaned = cleaned.replace(/\s*\d{2,4}\.\d{2}\.\d{2}\.?\s*$/g, '');
+
+            // 4) 날짜 앞에 붙어있던 무료/유료 태그 재확인 제거
+            cleaned = cleaned.replace(/\s*(무료|유료|대여|소장|다운로드|구매)\s*$/g, '');
+
+            // 5) 노벨피아 스타일 조회/추천/댓글 잡음 제거
+            cleaned = cleaned.replace(/\s*조회\s*[\d,]+.*$/, '');
+            cleaned = cleaned.replace(/\s*추천\s*[\d,]+.*$/, '');
+            cleaned = cleaned.replace(/\s*댓글\s*[\d,]+.*$/, '');
+            cleaned = cleaned.replace(/\s*좋아요\s*[\d,]+.*$/, '');
+
+            cleaned = cleaned.trim();
+
+            if (cleaned.length > 0 && !titles.includes(cleaned)) {
+                titles.push(cleaned);
+            }
+        }
+
+        return titles;
+    }
+
+    /**
+     * 노이즈 라인 여부 검사
+     */
+    static isNoiseLine(line) {
+        const trimmed = line.trim();
+        if (!trimmed) return true;
+
+        // 링크
+        if (/^https?:\/\//i.test(trimmed)) return true;
+        if (/^\[미리보기\]/i.test(trimmed)) return true;
+        if (/^\[다운로드\]/i.test(trimmed)) return true;
+
+        // 날짜만 있는 줄
+        if (/^\d{2,4}\.\d{2}\.\d{2}\.?$/.test(trimmed)) return true;
+
+        // 메타 통계 단어만 있는 줄
+        const singleNoises = [
+            '무료', '유료', '소장', '대여', '다운로드', '구매', '선물',
+            '조회', '좋아요', '추천', '선작', '댓글', '글자수', '쪽',
+            'UP', 'NEW', '공지', '목차', '첫화보기', '최신화'
+        ];
+        if (singleNoises.includes(trimmed)) return true;
+
+        // 단순 숫자(페이지 번호나 통계 수치)만 있는 줄
+        if (/^[\d,]+(쪽|화|개|명)?$/.test(trimmed) && trimmed.length <= 8) {
+            // 단, '1화'처럼 의미 있는 것은 통과시키기 위해 화/장은 제외
+            if (!trimmed.endsWith('화') && !trimmed.endsWith('장')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 최종 정제: 회차 번호 접두사 분리 옵션 및 인접 중복 제거
+     */
+    static finalize(titles, removeEpisodePrefix = true) {
+        const finalTitles = [];
+
+        for (let t of titles) {
+            let processed = t.trim();
+
+            if (removeEpisodePrefix) {
+                // "1화 재능 먹는 플레이어 (1)" -> "재능 먹는 플레이어 (1)"
+                // "제1장 각성의 순간" -> "각성의 순간"
+                // "1. 프롤로그" -> "프롤로그"
+                const prefixMatch = processed.match(/^(\d+\s*화|\d+\.|\d+\s*장|제\s*\d+\s*[화장])\s*(.+)$/);
+                if (prefixMatch && prefixMatch[2]) {
+                    processed = prefixMatch[2].trim();
+                }
+            }
+
+            if (processed.length > 0 && !finalTitles.includes(processed)) {
+                finalTitles.push(processed);
+            }
+        }
+
+        return finalTitles;
+    }
+}
+
+class UrlTocFetcher {
+    /**
+     * URL로부터 HTML 텍스트를 수집 (CORS 프록시 자동 폴백)
      * @param {string} url 
      * @returns {Promise<string>}
      */
@@ -40,15 +219,14 @@ class UrlTocFetcher {
             throw new Error('올바른 웹 페이지 주소(http:// 또는 https://)를 입력해 주세요.');
         }
 
-        // 1차 시도: 직접 Fetch (동일 오리진 or CORS 허용)
+        // 1차 시도: 직접 호출 (CORS 허용된 사이트)
         try {
             const res = await fetch(url, { mode: 'cors' });
             if (res.ok) {
-                const text = await res.text();
-                if (text && text.length > 500) return text;
+                return await res.text();
             }
         } catch (e) {
-            console.warn('직접 호출 제한, 프록시 체인을 가동합니다:', e.message);
+            console.warn('직접 연결 실패, CORS 프록시로 시도합니다:', e.message);
         }
 
         // 2차 시도: allorigins 프록시
@@ -56,44 +234,30 @@ class UrlTocFetcher {
             const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
             const res = await fetch(proxyUrl);
             if (res.ok) {
-                const text = await res.text();
-                if (text && text.length > 500) return text;
+                return await res.text();
             }
         } catch (e) {
-            console.warn('1차 프록시(allorigins) 우회 실패:', e.message);
+            console.warn('1차 프록시 실패:', e.message);
         }
 
-        // 3차 시도: corsproxy.io 프록시
+        // 3차 시도: corsproxy.io
         try {
-            const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-            const res = await fetch(proxyUrl);
+            const proxyUrl2 = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+            const res = await fetch(proxyUrl2);
             if (res.ok) {
-                const text = await res.text();
-                if (text && text.length > 500) return text;
+                return await res.text();
             }
         } catch (e) {
-            console.warn('2차 프록시(corsproxy) 우회 실패:', e.message);
+            console.warn('2차 프록시 실패:', e.message);
         }
 
-        // 4차 시도: codetabs 프록시
-        try {
-            const proxyUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`;
-            const res = await fetch(proxyUrl);
-            if (res.ok) {
-                const text = await res.text();
-                if (text && text.length > 500) return text;
-            }
-        } catch (e) {
-            console.warn('3차 프록시(codetabs) 우회 실패:', e.message);
-        }
-
-        throw new Error('사이트의 방화벽 또는 브라우저 CORS 정책으로 인해 링크 직접 수집이 차단되었습니다. 상단의 [HTML 소스 파싱] 탭 또는 [북마크릿]을 이용하시면 1초 만에 가져올 수 있습니다.');
+        throw new Error('웹 브라우저의 보안 정책(CORS)으로 인해 링크를 직접 가져오지 못했습니다. 첫 번째 [⚡ 마우스 복사 텍스트 1초 정제] 탭을 이용하시면 1초 만에 깔끔하게 등록됩니다.');
     }
 
     /**
-     * HTML 문서에서 플랫폼 자동 식별 및 소제목(목차) 목록 추출
+     * HTML 문서 텍스트에서 소제목(목차) 목록 추출
      * @param {string} htmlText 
-     * @param {object} options { excludeNotices: boolean, reverseOrder: boolean }
+     * @param {object} options
      * @returns {string[]}
      */
     static parseTocFromHtml(htmlText, options = {}) {
@@ -102,129 +266,24 @@ class UrlTocFetcher {
         const parser = new DOMParser();
         const doc = parser.parseFromString(htmlText, 'text/html');
 
-        let titles = [];
-
-        // 1. 노벨피아 (Novelpia) 패턴 검사
-        const isNovelpia = doc.querySelector('.notice_table, #episode_list_box, td[onclick*="/viewer/"]');
-        if (isNovelpia) {
-            titles = this.parseNovelpia(doc, options);
-        }
-
-        // 2. 네이버 시리즈 (Naver Series) 패턴 검사
-        if (titles.length === 0) {
-            const isNaver = doc.querySelector('a[class*="launchViewerForPreview"], ul.lst_thum, .volume_lst');
-            if (isNaver) {
-                titles = this.parseNaverSeries(doc, options);
-            }
-        }
-
-        // 3. 문피아 (Munpia) 패턴 검사
-        if (titles.length === 0) {
-            const isMunpia = doc.querySelector('td.subject a, .list_episode, div[class*="episode-list"]');
-            if (isMunpia) {
-                titles = this.parseMunpia(doc, options);
-            }
-        }
-
-        // 4. 범용 / 기타 플랫폼 패턴 검사
-        if (titles.length === 0) {
-            titles = this.parseGeneric(doc, options);
-        }
-
-        // 정제 및 중복/노이즈 제거
-        titles = this.cleanTitles(titles, options);
-
-        return titles;
-    }
-
-    /**
-     * [노벨피아 전용 파서]
-     * td[onclick*="/viewer/"] b 또는 tr.ep_style td.font12 b
-     */
-    static parseNovelpia(doc, options = {}) {
-        const titles = [];
-        // 노벨피아 회차 링크가 들어있는 요소 탐색
-        const epCells = doc.querySelectorAll('td[onclick*="/viewer/"], tr[class*="ep_style"] td.font12, table.notice_table tr td.font12');
-
-        epCells.forEach(cell => {
-            const boldEl = cell.querySelector('b');
-            let titleText = boldEl ? boldEl.textContent.trim() : cell.textContent.trim();
-
-            // 내부 통계 수치나 아이콘 텍스트 제거
-            titleText = titleText.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-
-            if (titleText && !titles.includes(titleText)) {
-                titles.push(titleText);
-            }
-        });
-
-        return titles;
-    }
-
-    /**
-     * [네이버 시리즈 전용 파서]
-     * a[class*="launchViewerForPreview"] 또는 ul.lst_thum li a
-     * 상위 작품명 span은 제외하고 회차명(strong)만 정밀 추출
-     */
-    static parseNaverSeries(doc, options = {}) {
-        const titles = [];
-        const links = doc.querySelectorAll('a[class*="launchViewerForPreview"], ul.lst_thum li a, .volume_lst li a');
-
-        links.forEach(link => {
-            const strong = link.querySelector('strong');
-            let titleText = '';
-
-            if (strong) {
-                titleText = strong.textContent.trim();
-            } else {
-                // span(작품명)을 복제본에서 제거하고 추출
-                const clone = link.cloneNode(true);
-                const spans = clone.querySelectorAll('span');
-                spans.forEach(s => s.remove());
-                titleText = clone.textContent.trim();
-            }
-
-            titleText = titleText.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-
-            if (titleText && !titles.includes(titleText)) {
-                titles.push(titleText);
-            }
-        });
-
-        return titles;
-    }
-
-    /**
-     * [문피아 전용 파서]
-     * td.subject a, .episode_item .title, .list_episode li a
-     */
-    static parseMunpia(doc, options = {}) {
-        const titles = [];
-        const items = doc.querySelectorAll('td.subject a, .episode_item .title, .list_episode li a, td.title a');
-
-        items.forEach(el => {
-            let titleText = el.textContent.trim();
-            titleText = titleText.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-            if (titleText && !titles.includes(titleText)) {
-                titles.push(titleText);
-            }
-        });
-
-        return titles;
-    }
-
-    /**
-     * [범용 웹소설 파서]
-     */
-    static parseGeneric(doc, options = {}) {
+        // 연재 사이트에서 흔히 쓰이는 소제목 셀렉터 우선순위 리스트
         const candidateSelectors = [
+            // 문피아
+            'td[onclick*="/viewer/"] b',
+            'tr.ep_style td.font12 b',
+            'td.subject a',
+            'td.title a',
+            // 네이버 시리즈
+            'a[class*="launchViewerForPreview"] strong',
+            'ul.lst_thum li a strong',
+            '.volume_lst li a strong',
+            // 노벨피아
+            'a[href*="/novel/"] .episode_title',
             '.episode_title',
             '.episode-title',
             '.episode_item .title',
             '.ep_title',
             '.sub_title',
-            'td.subject a',
-            'td.title a',
             '.list_item .title',
             '.chapter_title',
             '.chapter-list a',
@@ -237,70 +296,59 @@ class UrlTocFetcher {
             '.item-title'
         ];
 
+        let foundTitles = [];
+
+        // 1. 구체적인 클래스/셀렉터 탐색
         for (const selector of candidateSelectors) {
             const els = doc.querySelectorAll(selector);
             if (els.length >= 2) {
-                return Array.from(els).map(el => el.textContent.trim()).filter(Boolean);
+                foundTitles = Array.from(els).map(el => el.textContent.trim()).filter(Boolean);
+                break;
             }
         }
 
-        // 링크 태그 순회 패턴 매칭
-        const allLinks = Array.from(doc.querySelectorAll('a'));
-        const episodePattern = /(?:제\s*\d+\s*[화장]|^\d+[화장\.]|프롤로그|에필로그|외전)/;
-        const matching = allLinks
-            .map(a => a.textContent.trim())
-            .filter(t => t.length > 1 && t.length < 100 && episodePattern.test(t));
+        // 2. 만약 특정 클래스로 찾지 못했다면 링크(a 태그) 중 목차 패턴 탐색
+        if (foundTitles.length === 0) {
+            const allLinks = Array.from(doc.querySelectorAll('a'));
+            const linkTexts = allLinks
+                .map(a => a.textContent.trim())
+                .filter(t => t.length > 1 && t.length < 100);
 
-        if (matching.length >= 2) {
-            return matching;
+            // "n화", "제n장", "프롤로그" 등의 패턴을 포함하는 링크 그룹 탐색
+            const episodePattern = /(?:제\s*\d+\s*[화장]|^\d+[화장\.]|프롤로그|에필로그|외전)/;
+            const episodeLinks = linkTexts.filter(t => episodePattern.test(t));
+
+            if (episodeLinks.length >= 2) {
+                foundTitles = episodeLinks;
+            } else if (linkTexts.length > 5) {
+                // 부모 태그가 ul/ol/tbody 이며 반복되는 항목 추출
+                const listContainers = doc.querySelectorAll('ul, ol, tbody');
+                for (const container of listContainers) {
+                    const items = Array.from(container.querySelectorAll('a, li, tr td:first-child'))
+                        .map(el => el.textContent.trim())
+                        .filter(t => t.length > 1 && t.length < 80);
+                    
+                    if (items.length >= 5) {
+                        foundTitles = items;
+                        break;
+                    }
+                }
+            }
         }
 
-        return [];
-    }
-
-    /**
-     * 수집된 소제목 정제 (공지사항 필터링, 엔티티 디코딩, 노이즈 단어 제거)
-     */
-    static cleanTitles(titles, options = {}) {
-        const { excludeNotices = false } = options;
-
-        const noiseWords = [
-            '로그인', '회원가입', '공지사항', '이벤트', '댓글', '추천', '선작',
-            '마이페이지', 'TOP', '목차', '첫화보기', '최신화', '구매하기', '소장'
-        ];
-
-        const noticePatterns = [
-            /\[공지\]/i,
-            /^\s*공지\s*[:：]/i,
-            /휴재\s*공지/i,
-            /일러스트\s*공지/i,
-            /작가의\s*말/i,
-            /후기\s*공지/i
-        ];
-
-        const cleaned = titles
-            .map(t => {
-                // HTML 엔티티 디코딩 및 공백 정리
-                return t
-                    .replace(/&nbsp;/g, ' ')
-                    .replace(/&amp;/g, '&')
-                    .replace(/&lt;/g, '<')
-                    .replace(/&gt;/g, '>')
-                    .replace(/[\r\n\t]+/g, ' ')
-                    .replace(/\s{2,}/g, ' ')
-                    .trim();
-            })
+        // 3. 정제: 줄바꿈 제거, 중복 제거, 비목차 텍스트 필터링
+        const noiseWords = ['로그인', '회원가입', '공지사항', '이벤트', '댓글', '추천', '선작', '마이페이지', 'TOP', '목차'];
+        
+        let cleaned = foundTitles
+            .map(t => t.replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim())
             .filter(t => {
                 if (t.length < 1 || t.length > 120) return false;
                 if (noiseWords.some(w => t === w)) return false;
-
-                if (excludeNotices) {
-                    if (noticePatterns.some(p => p.test(t))) return false;
-                }
+                if (options.excludeNotices && /(공지|휴재|이벤트|일러스트|후기)/.test(t)) return false;
                 return true;
             });
 
-        // 인접 중복만 제거
+        // 연속 중복 항목만 제거
         const deduped = [];
         for (let i = 0; i < cleaned.length; i++) {
             if (i === 0 || cleaned[i] !== cleaned[i - 1]) {
@@ -314,5 +362,10 @@ class UrlTocFetcher {
 
 // 전역 등록
 if (typeof window !== 'undefined') {
+    window.SmartTextCleaner = SmartTextCleaner;
     window.UrlTocFetcher = UrlTocFetcher;
+    window.UrlTocFetcher.cleanDirtyText = SmartTextCleaner.clean.bind(SmartTextCleaner);
+}
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { SmartTextCleaner, UrlTocFetcher };
 }

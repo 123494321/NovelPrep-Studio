@@ -1,6 +1,6 @@
 /**
  * NovelPrep Studio - 만능 스마트 텍스트 정제 및 목차 추출 엔진
- * Version: v1.2.1
+ * Version: v1.2.2
  * 
  * [핵심 기능]
  * 1. SmartTextCleaner: 사용자가 문피아, 네이버 시리즈, 카카오페이지, 노벨피아 등에서
@@ -39,7 +39,14 @@ class SmartTextCleaner {
             if (result.length > 0) return this.finalize(result, removeEpisodePrefix);
         }
 
-        // 3. 네이버 시리즈 / 일반 회차 줄바꿈 패턴 검사
+        // 3. 노벨피아 패턴 검사 (EP.숫자 통계 줄 및 PLUS/무료 뱃지)
+        const isNovelpia = this.checkNovelpiaPattern(lines);
+        if (isNovelpia) {
+            result = this.parseNovelpiaLines(lines);
+            if (result.length > 0) return this.finalize(result, removeEpisodePrefix);
+        }
+
+        // 4. 네이버 시리즈 / 일반 회차 줄바꿈 패턴 검사
         // 예: 1화 재능 먹는 플레이어 (1) (2020.07.29.)
         result = this.parseSeriesAndGenericLines(lines);
 
@@ -103,6 +110,42 @@ class SmartTextCleaner {
     }
 
     /**
+     * 노벨피아 패턴 여부 확인 (EP.숫자 통계 줄 또는 PLUS 뱃지)
+     */
+    static checkNovelpiaPattern(lines) {
+        return lines.some(l => /^EP\.\s*\d+/i.test(l.trim()));
+    }
+
+    /**
+     * 노벨피아 패턴 라인 파싱
+     */
+    static parseNovelpiaLines(lines) {
+        const titles = [];
+
+        for (let line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+
+            // 1) EP.숫자 통계 라인 건너뛰기 (예: EP.0   1,070    10,830   57    591)
+            if (/^EP\.\s*\d+/i.test(trimmed)) continue;
+
+            // 2) 날짜 라인 건너뛰기 (예: 23.10.05, 2023.10.05)
+            if (/^\d{2,4}\.\d{2}\.\d{2}\.?$/.test(trimmed)) continue;
+
+            // 3) 앞머리의 노벨피아 뱃지 태그 제거 (무료, PLUS, PLUS 19, 독점, 성인, UP, NEW 등)
+            let cleaned = trimmed.replace(/^(?:무료|유료|PLUS(?:\s*19)?|성인|독점|UP|NEW)\s+/i, '').trim();
+
+            if (!cleaned || this.isNoiseLine(cleaned)) continue;
+
+            if (!titles.includes(cleaned)) {
+                titles.push(cleaned);
+            }
+        }
+
+        return titles;
+    }
+
+    /**
      * 네이버 시리즈 및 일반 패턴 라인 파싱
      */
     static parseSeriesAndGenericLines(lines) {
@@ -120,17 +163,20 @@ class SmartTextCleaner {
                 cleaned = mdMatch[1];
             }
 
-            // 2) 끝부분 무료/유료/다운로드/소장/대여/구매 태그 먼저 제거
+            // 2) 앞머리 플랫폼 뱃지 제거 (무료, PLUS, PLUS 19 등)
+            cleaned = cleaned.replace(/^(?:무료|유료|PLUS(?:\s*19)?|성인|독점|UP|NEW)\s+/i, '').trim();
+
+            // 3) 끝부분 무료/유료/다운로드/소장/대여/구매 태그 먼저 제거
             cleaned = cleaned.replace(/\s*(무료|유료|대여|소장|다운로드|구매)\s*$/g, '');
 
-            // 3) 끝부분 날짜 제거: (2020.07.29.), 2020.07.29, 21.07.23 등
+            // 4) 끝부분 날짜 제거: (2020.07.29.), 2020.07.29, 21.07.23 등
             cleaned = cleaned.replace(/\s*\(\s*\d{2,4}\.\d{2}\.\d{2}\.?\s*\)\s*$/g, '');
             cleaned = cleaned.replace(/\s*\d{2,4}\.\d{2}\.\d{2}\.?\s*$/g, '');
 
-            // 4) 날짜 앞에 붙어있던 무료/유료 태그 재확인 제거
+            // 5) 날짜 앞에 붙어있던 무료/유료 태그 재확인 제거
             cleaned = cleaned.replace(/\s*(무료|유료|대여|소장|다운로드|구매)\s*$/g, '');
 
-            // 5) 노벨피아 스타일 조회/추천/댓글 잡음 제거
+            // 6) 노벨피아 스타일 조회/추천/댓글 잡음 제거
             cleaned = cleaned.replace(/\s*조회\s*[\d,]+.*$/, '');
             cleaned = cleaned.replace(/\s*추천\s*[\d,]+.*$/, '');
             cleaned = cleaned.replace(/\s*댓글\s*[\d,]+.*$/, '');
@@ -157,6 +203,9 @@ class SmartTextCleaner {
         if (/^https?:\/\//i.test(trimmed)) return true;
         if (/^\[미리보기\]/i.test(trimmed)) return true;
         if (/^\[다운로드\]/i.test(trimmed)) return true;
+
+        // 노벨피아 EP.숫자 통계 라인 제거
+        if (/^EP\.\s*\d+/i.test(trimmed)) return true;
 
         // 날짜만 있는 줄
         if (/^\d{2,4}\.\d{2}\.\d{2}\.?$/.test(trimmed)) return true;

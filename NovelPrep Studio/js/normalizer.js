@@ -1,6 +1,6 @@
 /**
  * NovelPrep Studio - 소제목 정규화 & 순차 번호 주입 엔진
- * Version: v1.2.3
+ * Version: v1.2.5
  * 
  * [핵심 원칙]
  * 1. 단방향 순차 전진 탐색 (Sequential Forward Search):
@@ -58,6 +58,9 @@ class ManuscriptNormalizer {
         
         let cleanedTitle = title.trim();
 
+        // 웹 플랫폼 부가 뱃지 제거 (예: [무료마지막화], [무료], [19금] 등)
+        cleanedTitle = cleanedTitle.replace(/\[\s*(?:무료|유료|19금?|공지|단행본|특별편|외전|약수정|수정)[^\]]*\]/gi, '').trim();
+
         // 소제목 끝에 붙어있을 수 있는 부호(예: (1), [1], -1-, 1 등) 분리 감지
         // 예: "깨어난 그림자 (1)" -> base: "깨어난 그림자", suffix: "(1)"
         let basePattern = cleanedTitle;
@@ -76,6 +79,9 @@ class ManuscriptNormalizer {
             }
         }
 
+        // 작가 본문 부가 주석/메모 유연 매칭 (예: (*약수정), [무료마지막회], [완결], [完] 등)
+        const annotationRegex = `(?:\\s*[\\(\\[<][^\\]\\)>\\r\\n]*(?:수정|무료|완결|完)[^\\]\\)>\\r\\n]*[\\]\\)>])?`;
+
         let escapedBase = this.escapeRegExp(basePattern);
 
         if (ignoreSpaces) {
@@ -84,9 +90,19 @@ class ManuscriptNormalizer {
             escapedBase = escapedBase.replace(/\s+/g, '\\s*');
         }
 
-        // 전체 패턴: 반드시 줄의 시작(^)에서 시작 (문장 중간에 삽입된 단어 오매칭 차단)
-        // 소제목 앞뒤로 흔히 붙는 기호(◆, ■, [소제목], <소제목>, # 등) 및 들여쓰기 공백 허용
-        const fullPattern = `^([ \\t]*[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*)${escapedBase}${suffixRegex}([ \\t]*[\\]>]?[ \\t]*(?:\\r?\\n|$))`;
+        // 선행 패턴(prefixGroup):
+        // 1) 줄 시작(^)에서 공백, ─+ 구분선, 기존 회차 번호([1], 1화 등), [#■◆◇▶▷●○※★☆\\[<] 허용
+        // 2) 또는 이전 회차 닫는 태그([>끝]) 뒤에 줄바꿈 없이 바로 붙은 경우
+        // 3) 또는 본문/작가의 말 문장 뒤에 줄바꿈 없이 바로 붙은 <소제목> 형태 허용
+        const existingEpPrefix = `(?:(?:\\[|\\(|<|제)?\\s*\\d+\\s*(?:화|장|편|회|\\.)?\\s*(?:\\]|\\)|>|\\.)?\\s*)?`;
+        const prefixGroup = `(^[ \\t]*(?:─+[ \\t]*)?${existingEpPrefix}[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*|(?:[>끝][ \\t]*[<]?[ \\t]*)|(?:[^\\r\\n][ \\t]*<[ \\t]*))`;
+
+        // 후행 패턴(suffixGroup):
+        // 1) 줄바꿈 기호(\r?\n 또는 끝). 단, 이전 회차 끝 태그(<... > 끝)를 소제목 시작으로 오인하지 않도록 방지
+        // 2) 또는 구분선(─+) 등으로 인해 줄바꿈 없이 본문 첫 문장이 바로 이어진 경우((?=[^\r\n]))
+        const suffixGroup = `([ \\t]*[\\]>]?[ \\t]*(?!(?:끝|[完]))(?:\\r?\\n|$)|(?=[^\\r\\n]))`;
+
+        const fullPattern = `${prefixGroup}${escapedBase}${suffixRegex}${annotationRegex}${suffixGroup}`;
 
         return new RegExp(fullPattern, 'm');
     }
@@ -143,7 +159,17 @@ class ManuscriptNormalizer {
 
             // 이전 탐색 완료 지점(lastSearchIndex) 이후의 슬라이스에서 검색
             const remainingText = source.substring(lastSearchIndex);
-            const match = pattern.exec(remainingText);
+            let match = pattern.exec(remainingText);
+
+            // 비표준 한글/인코딩 글자 깨짐 대응 지능형 안전 폴백 (예: 누구냗! vs 누구†d!)
+            if (!match && rawTitle.length >= 2) {
+                const prefix2 = this.escapeRegExp(rawTitle.substring(0, 2));
+                const fuzzyPattern = new RegExp(`(^[ \\t]*[#■◆◇▶▷●○※★☆\\[<]?[ \\t]*|끝[ \\t]*<)[ \\t]*${prefix2}[^\\r\\n>\\]]{1,10}([ \\t]*[\\]>]?[ \\t]*(?:\\r?\\n|$))`, 'm');
+                const fMatch = fuzzyPattern.exec(remainingText);
+                if (fMatch) {
+                    match = fMatch;
+                }
+            }
 
             if (match) {
                 const matchOffsetInRemaining = match.index;
@@ -156,10 +182,35 @@ class ManuscriptNormalizer {
                 resultChunks.push(leadingOriginal);
 
                 // 2) 매칭된 제목을 새로운 정규화 형식으로 변환
-                // match[1]은 선행 공백/기호, match[2]는 후행 줄바꿈 기호
-                const prefixDecor = match[1] || '';
-                const suffixDecor = match[2] || '\n';
+                let prefixDecor = match[1] || '';
+                let suffixDecor = match[2] || '\n';
                 
+                // 특수 상황 처리 1: ──────── 기호가 앞에 붙어있던 경우, 지저분한 구분선을 지우고 소제목만 깔끔하게 주입
+                if (/─{2,}/.test(prefixDecor)) {
+                    prefixDecor = '';
+                } else if (/[>끝]/.test(prefixDecor)) {
+                    // 특수 상황 처리 2: 이전 회차 끝('끝' 또는 '>') 뒤에 줄바꿈 없이 붙은 경우 앞 회차 보존 후 개행
+                    const endingChar = prefixDecor.match(/[>끝]+/)[0];
+                    prefixDecor = endingChar + '\r\n\r\n';
+                } else if (/(?:^|\s|\[)(?:제\s*)?\d+[화장편회.]?\]?/.test(prefixDecor) || /^[ \t]*[\[<]?[ \t]*$/.test(prefixDecor)) {
+                    // 기존 회차 번호([1], 1화 등) 또는 단순 장식 괄호([, < 등)는 새 번호로 교체
+                    prefixDecor = '';
+                } else if (/[^ \t\r\n]/.test(prefixDecor)) {
+                    // 문장 뒤에 줄바꿈 없이 <소제목>이 붙은 경우 앞 문장 보존 후 개행
+                    const before = prefixDecor.replace(/[#■◆◇▶▷●○※★☆\\[<][ \\t]*$/, '');
+                    prefixDecor = before + '\r\n\r\n';
+                } else {
+                    prefixDecor = '';
+                }
+
+                // 후행 장식자 정리: 닫는 괄호(], >) 정리
+                suffixDecor = suffixDecor.replace(/^[ \t]*[\]>][ \t]*/, '');
+
+                // 특수 상황 처리 3: 소제목 뒤에 본문이 바로 이어진 경우(줄바꿈이 없던 경우), 본문 첫 문장을 다음 줄로 안전 분리
+                if (!/\r?\n$/.test(suffixDecor)) {
+                    suffixDecor = '\r\n\r\n' + suffixDecor;
+                }
+
                 const newTitle = this.formatEpisodeTitle(formatTemplate, currentEpisodeNum, rawTitle);
                 
                 // 원문의 줄바꿈 구조 유지: 선행/후행 공백 및 개행을 보존하며 제목만 교체

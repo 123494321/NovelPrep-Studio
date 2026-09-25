@@ -1,6 +1,6 @@
 /**
  * NovelPrep Studio - 만능 스마트 텍스트 정제 및 목차 추출 엔진
- * Version: v1.2.3
+ * Version: v1.2.5
  * 
  * [핵심 기능]
  * 1. SmartTextCleaner: 사용자가 문피아, 네이버 시리즈, 카카오페이지, 노벨피아 등에서
@@ -247,6 +247,9 @@ class SmartTextCleaner {
                     processed = prefixMatch[2].trim();
                 }
             }
+
+            // 웹 플랫폼 부가 뱃지/태그 제거: [무료마지막화], [무료], [유료], [19금], [완결], [단행본] 등
+            processed = processed.replace(/\[\s*(?:무료|유료|19금?|공지|단행본|특별편|외전|약수정|수정)[^\]]*\]/gi, '').trim();
 
             if (processed.length > 0 && !finalTitles.includes(processed)) {
                 finalTitles.push(processed);

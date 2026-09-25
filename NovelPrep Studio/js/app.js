@@ -1,9 +1,9 @@
 /**
  * NovelPrep Studio - Application Controller
- * Version: v1.2.2
+ * Version: v1.2.3
  */
 
-const APP_VERSION = 'v1.2.2';
+const APP_VERSION = 'v1.2.3';
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log(`%c🚀 NovelPrep Studio ${APP_VERSION} 가동 완료`, 'color: #6366f1; font-weight: bold; font-size: 14px;');
@@ -433,7 +433,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (formatTemplate === 'custom') {
             formatTemplate = inputCustomFormat.value.trim() || '[{n}화]. {title}';
         }
-        const startNumber = parseInt(inputStartNumber.value, 10) || 1;
+        const parsedStart = parseInt(inputStartNumber.value, 10);
+        const startNumber = isNaN(parsedStart) ? 1 : parsedStart;
         const flexSuffix = checkFlexSuffix.checked;
         const ignoreSpaces = checkIgnoreSpaces.checked;
 

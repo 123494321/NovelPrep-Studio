@@ -1,6 +1,6 @@
 /**
  * NovelPrep Studio - 소제목 정규화 & 순차 번호 주입 엔진
- * Version: v1.2.1
+ * Version: v1.2.3
  * 
  * [핵심 원칙]
  * 1. 단방향 순차 전진 탐색 (Sequential Forward Search):
@@ -133,7 +133,8 @@ class ManuscriptNormalizer {
         const matches = [];
         const unmatched = [];
 
-        let currentEpisodeNum = Number(startNumber) || 1;
+        const parsedStart = Number(startNumber);
+        let currentEpisodeNum = isNaN(parsedStart) ? 1 : parsedStart;
 
         // 목차 순서대로 하나씩 순차 전진 탐색 진행
         for (let i = 0; i < this.tocList.length; i++) {

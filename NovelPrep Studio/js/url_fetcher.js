@@ -1,6 +1,6 @@
 /**
  * NovelPrep Studio - 만능 스마트 텍스트 정제 및 목차 추출 엔진
- * Version: v1.2.2
+ * Version: v1.2.3
  * 
  * [핵심 기능]
  * 1. SmartTextCleaner: 사용자가 문피아, 네이버 시리즈, 카카오페이지, 노벨피아 등에서

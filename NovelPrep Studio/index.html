@@ -9,6 +9,12 @@
     <meta name="description" content="소설 원고 목차 자동 수집, 단방향 순차 탐색 회차 번호 주입, 구형 EPUB 고품질 TXT 역변환 웹 툴">
     <meta name="theme-color" content="#4f46e5">
 
+    <!-- PWA Settings -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+
     <!-- Fonts & Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -49,7 +55,7 @@
                     <i class="fa-regular fa-circle-question"></i>
                     <span>가이드</span>
                 </button>
-                <a href="../EPUB 웹 툴 제작/index.html" target="_blank" class="btn btn-outline-brand" title="완성된 원고로 전자책을 제작하는 EPUB Studio로 이동">
+                <a href="https://123494321.github.io/EPUB-creation-web-tool/EPUB%20%EC%9B%B9%20%ED%88%B4%20%EC%A0%9C%EC%9E%91/index.html" target="_blank" class="btn btn-outline-brand" title="완성된 원고로 전자책을 제작하는 EPUB Studio로 이동">
                     <i class="fa-solid fa-book-open-reader"></i>
                     <span>EPUB Studio 열기</span>
                     <i class="fa-solid fa-arrow-up-right-from-square text-xs"></i>
@@ -572,8 +578,8 @@
                     </div>
                 </section>
                 <section class="guide-section">
-                    <h4>3. EPUB Studio (v2.2.5) 연계</h4>
-                    <p>NovelPrep Studio에서 정돈된 <code>[1화]. 소제목</code> 형태의 원고를 생성한 뒤, <a href="../EPUB 웹 툴 제작/index.html" target="_blank" class="link-btn">EPUB Studio</a>에 업로드하면 목차 패턴 분석 클릭 한 번으로 완벽한 표준 전자책을 1분 만에 완성할 수 있습니다.</p>
+                    <h4>3. EPUB Studio (v2.2.6) 연계</h4>
+                    <p>NovelPrep Studio에서 정돈된 <code>[1화]. 소제목</code> 형태의 원고를 생성한 뒤, <a href="https://123494321.github.io/EPUB-creation-web-tool/EPUB%20%EC%9B%B9%20%ED%88%B4%20%EC%A0%9C%EC%9E%91/index.html" target="_blank" class="link-btn">EPUB Studio</a>에 업로드하면 목차 패턴 분석 클릭 한 번으로 완벽한 표준 전자책을 1분 만에 완성할 수 있습니다.</p>
                 </section>
             </div>
             <div class="modal-footer">
@@ -590,5 +596,16 @@
     <script src="js/epub_extractor.js?v=1.2.6"></script>
     <script src="js/url_fetcher.js?v=1.2.6"></script>
     <script src="js/app.js?v=1.2.6"></script>
+
+    <!-- PWA Service Worker Registration -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => console.log('[PWA] Service Worker registered with scope:', reg.scope))
+                    .catch((err) => console.warn('[PWA] Service Worker registration failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>

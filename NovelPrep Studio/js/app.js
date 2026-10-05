@@ -1,9 +1,9 @@
 /**
  * NovelPrep Studio - Application Controller
- * Version: v1.2.6
+ * Version: v1.2.7
  */
 
-const APP_VERSION = 'v1.2.6';
+const APP_VERSION = 'v1.2.7';
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log(`%c🚀 NovelPrep Studio ${APP_VERSION} 가동 완료`, 'color: #6366f1; font-weight: bold; font-size: 14px;');
@@ -664,12 +664,35 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // EPUB Copy & Downloads (Full 100% Text)
+    // Title helper for EPUB downloads (falls back to uploaded filename if metadata title is corrupted or generic)
+    function getCleanEpubTitle() {
+        let title = state.epubResult?.metadata?.title;
+        const fileBase = state.epubFile ? state.epubFile.name.replace(/\.epub$/i, '') : '';
+        const isSingleChapterTitle = /^(?:<|\(|\[)?\s*\d+\s*(?:화|장|편|회)?\s*(?:>|\)|\])?$/i.test(title?.trim() || '');
+        if (!title || title.trim() === '무제' || (isSingleChapterTitle && fileBase)) {
+            title = fileBase || title || '추출원고';
+        }
+        return title.replace(/[\\/:*?"<>|]/g, '_').trim() || '추출원고';
+    }
+
+    // EPUB 변환 옵션 변경 시 즉각 자동 재추출 (파일이 이미 로드된 경우)
+    function handleEpubOptionChange() {
+        if (state.epubFile && state.epubResult && !btnRunEpubExtraction.disabled) {
+            btnRunEpubExtraction.click();
+        }
+    }
+
+    selectParagraphSpacing.addEventListener('change', handleEpubOptionChange);
+    selectRubyMode.addEventListener('change', handleEpubOptionChange);
+    checkInsertChapterTitles.addEventListener('change', handleEpubOptionChange);
+
+    // EPUB Copy & Downloads (Full 100% Text with CRLF normalization)
     btnCopyEpubTxt.addEventListener('click', async () => {
         const fullText = state.epubResult?.extractedText || epubExtractedTextPreview.value;
         if (!fullText) return;
+        const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n');
         try {
-            await navigator.clipboard.writeText(fullText);
+            await navigator.clipboard.writeText(cleanText);
             showToast('전체 순수 텍스트 원고(100%)가 복사되었습니다.', 'success');
         } catch (e) {
             epubExtractedTextPreview.select();
@@ -681,16 +704,17 @@ document.addEventListener('DOMContentLoaded', () => {
     btnDownloadEpubTxt.addEventListener('click', () => {
         const fullText = state.epubResult?.extractedText || epubExtractedTextPreview.value;
         if (!fullText) return;
-        const title = (state.epubResult?.metadata?.title || '추출원고').replace(/[\\/:*?"<>|]/g, '_');
+        const cleanText = fullText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n/g, '\r\n');
+        const title = getCleanEpubTitle();
         const filename = `${title}.txt`;
-        downloadBlob(new Blob([fullText], { type: 'text/plain;charset=utf-8' }), filename);
+        downloadBlob(new Blob([cleanText], { type: 'text/plain;charset=utf-8' }), filename);
         showToast(`"${filename}" 다운로드가 시작되었습니다.`, 'success');
     });
 
     btnDownloadEpubImages.addEventListener('click', async () => {
         try {
             const zipBlob = await epubExtractor.generateImagesZip();
-            const title = (state.epubResult?.metadata?.title || '삽화이미지').replace(/[\\/:*?"<>|]/g, '_');
+            const title = getCleanEpubTitle();
             const filename = `[이미지]_${title}.zip`;
             downloadBlob(zipBlob, filename);
             showToast(`"${filename}" 다운로드가 시작되었습니다.`, 'success');
@@ -702,7 +726,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnDownloadEpubAllZip.addEventListener('click', async () => {
         try {
             const zipBlob = await epubExtractor.generatePackageZip();
-            const title = (state.epubResult?.metadata?.title || '완성패키지').replace(/[\\/:*?"<>|]/g, '_');
+            const title = getCleanEpubTitle();
             const filename = `[전체패키지]_${title}.zip`;
             downloadBlob(zipBlob, filename);
             showToast(`"${filename}" 통합 패키지 다운로드가 시작되었습니다.`, 'success');

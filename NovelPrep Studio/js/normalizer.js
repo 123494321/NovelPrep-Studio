@@ -1,6 +1,6 @@
 /**
  * NovelPrep Studio - 소제목 정규화 & 순차 번호 주입 엔진
- * Version: v1.2.6 (Clean Standard Rollback & CRLF Stabilization)
+ * Version: v1.2.7 (Leaf-Block EPUB Extractor & Reactivity Enhancement)
  * 
  * [핵심 원칙]
  * 1. 단방향 순차 전진 탐색 (Sequential Forward Search):

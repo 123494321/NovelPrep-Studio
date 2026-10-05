@@ -358,49 +358,71 @@ class EpubExtractor {
             }
         });
 
-        // 3. 문단 구분자 처리: <p>, <div>, <h1>~<h6>, <li>, <br>
+        // 3. 줄바꿈 태그(<br>)를 줄바꿈 문자로 변환
         const body = doc.body || doc.documentElement;
         if (!body) return '';
 
         const brs = body.querySelectorAll('br');
         brs.forEach(br => br.replaceWith(document.createTextNode('\n')));
 
-        const blockEls = body.querySelectorAll('p, div, h1, h2, h3, h4, h5, h6, li, blockquote, tr');
-        blockEls.forEach(block => {
-            block.prepend(document.createTextNode('\n'));
-            block.append(document.createTextNode('\n'));
-        });
+        // 4. 문단 블록 추출 (최하위 리프 블록 단위 분석)
+        const blockSelectors = 'p, h1, h2, h3, h4, h5, h6, li, blockquote, dt, dd, div, tr';
+        const allBlocks = Array.from(body.querySelectorAll(blockSelectors));
 
-        // 4. 텍스트 추출
-        let rawExtracted = body.textContent || '';
+        // 자식 블록을 포함하지 않는 순수 리프(Leaf) 블록만 선별 (부모 div와 자식 p 중복 추출 방지)
+        const leafBlocks = allBlocks.filter(block => !block.querySelector(blockSelectors));
 
-        // 5. HTML 엔티티 및 특수공백 디코딩
-        rawExtracted = this.decodeHtmlEntities(rawExtracted);
+        let extractedParagraphs = [];
 
-        // 6. 문단 호흡 및 줄바꿈 정제
-        let lines = rawExtracted.split(/\r?\n/).map(line => line.trim());
+        if (leafBlocks.length === 0) {
+            // 블록 태그가 없는 경우(예: body 내부에 직접 텍스트와 <br>만 있는 경우)
+            const raw = this.decodeHtmlEntities(body.textContent || '');
+            extractedParagraphs = raw.split(/\r?\n/).map(l => l.trim());
+        } else {
+            leafBlocks.forEach(block => {
+                let t = this.decodeHtmlEntities(block.textContent || '');
+                // 특수 공백 정규화
+                t = t.replace(/\u00a0/g, ' ').replace(/\u3000/g, '  ');
+                // 블록 내부에 있던 <br>이 \n으로 변환된 경우 분할
+                const subLines = t.split(/\r?\n/).map(l => l.trim());
+                subLines.forEach(line => {
+                    extractedParagraphs.push(line);
+                });
+            });
+        }
 
-        if (paragraphSpacing === 'standard') {
-            let formatted = [];
+        // 5. 문단 호흡 및 줄바꿈 서식 적용
+        if (paragraphSpacing === 'raw') {
+            // 원본 태그 구조 그대로 유지:
+            // 연속된 본문 문단은 단일 줄바꿈(\n)으로 이어지고,
+            // 빈 문단(<p>&nbsp;</p>, <p></p> 등 의도된 장면 전환)만 빈 줄로 보존
+            return extractedParagraphs.join('\n').trim();
+        } else if (paragraphSpacing === 'standard') {
+            // 웹소설 표준 줄바꿈: 문단마다 빈 줄 1줄 유지 (연속 빈 줄은 1줄로 압축)
+            const formatted = [];
             let lastWasEmpty = true;
 
-            for (const line of lines) {
+            for (const line of extractedParagraphs) {
                 if (line.length === 0) {
                     if (!lastWasEmpty) {
                         formatted.push('');
                         lastWasEmpty = true;
                     }
                 } else {
+                    if (!lastWasEmpty) {
+                        formatted.push('');
+                    }
                     formatted.push(line);
                     lastWasEmpty = false;
                 }
             }
             return formatted.join('\n').trim();
         } else if (paragraphSpacing === 'single') {
-            return lines.filter(line => line.length > 0).join('\n').trim();
-        } else {
-            return lines.join('\n').trim();
+            // 단일 줄바꿈: 모든 빈 줄을 제거하고 엔터만 유지
+            return extractedParagraphs.filter(l => l.length > 0).join('\n').trim();
         }
+
+        return extractedParagraphs.join('\n').trim();
     }
 
     /**
